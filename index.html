@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DEAD PROCESS</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div id="game-container">
+    <!-- タイトル画面 -->
+    <div id="title-screen">
+      <div class="crt-overlay"></div>
+      <div class="title-content">
+        <pre id="title-ascii" aria-hidden="true">
+ ____  _____    _    ____    ____  ____   ___   ____ _____ ____ ____
+|  _ \| ____|  / \  |  _ \  |  _ \|  _ \ / _ \ / ___| ____/ ___/ ___|
+| | | |  _|   / _ \ | | | | | |_) | |_) | | | | |   |  _| \___ \___ \
+| |_| | |___ / ___ \| |_| | |  __/|  _ &lt;| |_| | |___| |___ ___) |__) |
+|____/|_____/_/   \_\____/  |_|   |_| \_\\___/ \____|_____|____/____/
+        </pre>
+        <p class="subtitle">― 深夜のデータセンターから、生きて帰れ ―</p>
+        <p class="blink-text">[ PRESS ENTER TO START ]</p>
+      </div>
+    </div>
+
+    <!-- プロローグ画面 -->
+    <div id="prologue-screen" style="display:none">
+      <div class="crt-overlay"></div>
+      <div id="prologue-text"></div>
+    </div>
+
+    <!-- ゲーム画面 -->
+    <div id="game-screen" style="display:none">
+      <div class="crt-overlay"></div>
+      <!-- ステージヘッダー -->
+      <div id="stage-header">
+        <span id="stage-name"></span>
+        <span id="timer" style="display:none">
+          <span class="timer-icon">⏱</span>
+          <span id="timer-value">03:00</span>
+        </span>
+      </div>
+
+      <!-- メインビュー -->
+      <div id="main-view"></div>
+
+      <!-- ターミナル -->
+      <div id="terminal">
+        <div id="terminal-output"></div>
+        <div id="terminal-input-line">
+          <span class="prompt">$ </span>
+          <input type="text" id="terminal-input" spellcheck="false" autocomplete="off">
+        </div>
+      </div>
+
+      <!-- インベントリ -->
+      <div id="inventory">
+        <span class="inventory-label">INVENTORY</span>
+        <div id="inventory-items"></div>
+      </div>
+    </div>
+
+    <!-- エンディング画面 -->
+    <div id="ending-screen" style="display:none">
+      <div class="crt-overlay"></div>
+      <div id="ending-content"></div>
+    </div>
+  </div>
+
+  <!-- ホラーオーバーレイ -->
+  <div id="horror-overlay"></div>
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
