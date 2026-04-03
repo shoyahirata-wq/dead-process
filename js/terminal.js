@@ -5,6 +5,7 @@ export class Terminal {
     this.outputEl = document.getElementById('terminal-output');
     this.inputEl = document.getElementById('terminal-input');
     this.onCommand = onCommand;
+    this.onTabComplete = null; // set by Game
     this.history = [];
     this.historyIndex = -1;
     this.enabled = true;
@@ -14,6 +15,22 @@ export class Terminal {
 
   handleKey(e) {
     if (!this.enabled) return;
+
+    if (e.key === 'Tab') {
+      e.preventDefault();
+      e.stopPropagation();
+      if (this.onTabComplete) {
+        const result = this.onTabComplete(this.inputEl.value);
+        if (result) {
+          this.inputEl.value = result.completed;
+          if (result.candidates && result.candidates.length > 1) {
+            this.writeLine(`$ ${this.inputEl.value}`, 'input');
+            this.writeLines(result.candidates, 'system');
+          }
+        }
+      }
+      return;
+    }
 
     if (e.key === 'Enter') {
       const cmd = this.inputEl.value.trim();

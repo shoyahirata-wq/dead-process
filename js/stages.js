@@ -1,5 +1,132 @@
 // ===== ALL 5 STAGES =====
 
+// ----- Shared Utilities -----
+
+// Resolve relative path against cwd
+function resolvePath(input, cwd) {
+  if (!input) return cwd;
+  if (input.startsWith('/')) return input.replace(/\/+$/, '');
+  const path = input.startsWith('./') ? input.slice(2) : input;
+  const resolved = cwd === '/' ? `/${path}` : `${cwd}/${path}`;
+  return resolved.replace(/\/+$/, '');
+}
+
+// Find matching file/dir paths for tab completion
+function getPathCompletions(partial, filesystem, cwd) {
+  const resolved = partial ? resolvePath(partial, cwd) : cwd;
+  const candidates = [];
+
+  // Check exact directory match — list its contents
+  const dirEntries = Object.keys(filesystem).filter(k =>
+    k !== resolved && k.startsWith(resolved + '/')
+    && k.slice(resolved.length + 1).indexOf('/') === -1
+  );
+  if (dirEntries.length > 0) {
+    return dirEntries.map(k => k.split('/').pop());
+  }
+
+  // Prefix match on all paths
+  Object.keys(filesystem).forEach(fullPath => {
+    if (fullPath.startsWith(resolved)) {
+      candidates.push(fullPath);
+    }
+  });
+  return candidates;
+}
+
+// Build tab-completion result for a stage
+function buildCompletions(input, stage) {
+  const parts = input.split(/\s+/);
+  const allCmds = [...stage.availableCommands, 'clear', 'whoami', 'pwd', 'date', 'uname'];
+
+  if (parts.length <= 1) {
+    // Complete command name
+    const partial = parts[0] || '';
+    const matches = allCmds.filter(c => c.startsWith(partial));
+    if (matches.length === 1) {
+      return { completed: matches[0] + ' ', candidates: null };
+    } else if (matches.length > 1) {
+      // Find longest common prefix
+      const prefix = longestCommonPrefix(matches);
+      return { completed: prefix, candidates: matches };
+    }
+    return null;
+  }
+
+  // Complete file path (for cat, ls, mount, chmod, systemctl, etc.)
+  const cmd = parts[0];
+  const partial = parts[parts.length - 1] || '';
+  const cwd = stage.cwd || '/';
+
+  // Collect all known paths from filesystem(s)
+  const allPaths = { ...stage.filesystem };
+  if (stage.hddMounted && stage.hddFilesystem) Object.assign(allPaths, stage.hddFilesystem);
+  if (stage.usbMounted && stage.usbFilesystem) Object.assign(allPaths, stage.usbFilesystem);
+
+  const resolved = partial ? resolvePath(partial, cwd) : cwd;
+  const matches = Object.keys(allPaths).filter(p => p.startsWith(resolved));
+
+  if (matches.length === 1) {
+    // Return the full path for absolute, or keep relative style
+    const match = matches[0];
+    const before = parts.slice(0, -1).join(' ');
+    const suffix = allPaths[match] === null ? '/' : ' '; // dir vs file
+    return { completed: before + ' ' + match + suffix, candidates: null };
+  } else if (matches.length > 1) {
+    const prefix = longestCommonPrefix(matches);
+    const before = parts.slice(0, -1).join(' ');
+    const display = matches.map(m => m.split('/').pop());
+    return { completed: before + ' ' + prefix, candidates: display };
+  }
+
+  // Try completing systemctl service names
+  if (cmd === 'systemctl' && stage.services) {
+    const action = parts[1];
+    if (action === 'stop' && parts.length === 3) {
+      const svcPartial = parts[2];
+      const svcMatches = stage.services
+        .filter(s => s.running && s.name.startsWith(svcPartial))
+        .map(s => s.name);
+      if (svcMatches.length === 1) {
+        return { completed: `systemctl stop ${svcMatches[0]}`, candidates: null };
+      } else if (svcMatches.length > 1) {
+        const prefix = longestCommonPrefix(svcMatches);
+        return { completed: `systemctl stop ${prefix}`, candidates: svcMatches };
+      }
+    }
+  }
+
+  return null;
+}
+
+function longestCommonPrefix(strings) {
+  if (strings.length === 0) return '';
+  let prefix = strings[0];
+  for (let i = 1; i < strings.length; i++) {
+    while (!strings[i].startsWith(prefix)) {
+      prefix = prefix.slice(0, -1);
+    }
+  }
+  return prefix;
+}
+
+// Lookup file content, supporting relative paths
+function lookupFile(path, filesystem, cwd) {
+  const resolved = resolvePath(path, cwd);
+  if (resolved in filesystem) return { found: true, content: filesystem[resolved], resolved };
+  return { found: false, resolved };
+}
+
+// Lookup directory entries, supporting relative paths
+function lookupDir(path, dirs, cwd) {
+  const resolved = resolvePath(path, cwd) || '/';
+  return dirs[resolved] || null;
+}
+
+
+export { buildCompletions };
+
+
 // ----- Stage 1: Server Room -----
 export const stage1 = {
   id: 1,
@@ -47,6 +174,7 @@ export const stage1 = {
     '192.168.1.7': true, '192.168.1.8': false,
   },
 
+  cwd: '/home/user',
   availableCommands: ['ls', 'cat', 'ping', 'help'],
   answer: 13, // 2 + 4 + 7
   keypadValue: '',
@@ -143,7 +271,7 @@ export const stage1 = {
       btn.style.display = 'none';
       result.textContent = 'LANケーブル（予備）を発見した！';
       result.style.color = 'var(--green)';
-      engine.engine.addItem({ id: 'lan_cable', name: 'LANケーブル', icon: '🔌' });
+      engine.engine.addItem({ id: 'lan_cable', name: 'LANケーブル', icon: '🔌', hint: 'ネットワーク室でスイッチの配線に使用' });
       engine.effects.showNotification('LANケーブル を入手した', 'item-get');
       engine.renderInventory();
     });
@@ -162,8 +290,9 @@ export const stage1 = {
         ], 'system');
         break;
       case 'ls': {
-        const path = args[1] || '/home/user';
-        const entries = this.getDirectoryEntries(path);
+        const path = args[1] || this.cwd;
+        const resolved = resolvePath(path, this.cwd);
+        const entries = this.getDirectoryEntries(resolved);
         if (entries) {
           engine.terminal.writeLines(entries);
         } else {
@@ -174,10 +303,10 @@ export const stage1 = {
       case 'cat': {
         const file = args[1];
         if (!file) { engine.terminal.writeError('cat: ファイルを指定してください'); break; }
-        const content = this.filesystem[file];
-        if (content) {
-          engine.terminal.writeLines(content.split('\n'));
-        } else if (content === null) {
+        const result = lookupFile(file, this.filesystem, this.cwd);
+        if (result.found && result.content) {
+          engine.terminal.writeLines(result.content.split('\n'));
+        } else if (result.found && result.content === null) {
           engine.terminal.writeError(`cat: ${file}: Is a directory`);
         } else {
           engine.terminal.writeError(`cat: ${file}: No such file or directory`);
@@ -261,6 +390,7 @@ Port 4: 192.168.40.0/24  - VLAN40 (IoT/センサー系統)`,
     '/var/log': null,
   },
 
+  cwd: '/',
   availableCommands: ['ls', 'cat', 'ip', 'help'],
   ports: [
     { id: 1, name: 'Port 1 - Camera (VLAN10)', network: 'camera', connected: true },
@@ -359,7 +489,7 @@ Port 4: 192.168.40.0/24  - VLAN40 (IoT/センサー系統)`,
       btn.style.display = 'none';
       result.textContent = 'HDD（2.5インチ SATA）を発見した！';
       result.style.color = 'var(--green)';
-      engine.engine.addItem({ id: 'hdd', name: 'HDD', icon: '💾' });
+      engine.engine.addItem({ id: 'hdd', name: 'HDD', icon: '💾', hint: 'ストレージ室の端末に挿入 → mountでマウント' });
       engine.effects.showNotification('HDD を入手した', 'item-get');
       engine.renderInventory();
     });
@@ -378,8 +508,9 @@ Port 4: 192.168.40.0/24  - VLAN40 (IoT/センサー系統)`,
         ], 'system');
         break;
       case 'ls': {
-        const path = args[1] || '/';
-        const entries = this.getDirectoryEntries(path);
+        const path = args[1] || this.cwd;
+        const resolved = resolvePath(path, this.cwd);
+        const entries = this.getDirectoryEntries(resolved);
         if (entries) {
           engine.terminal.writeLines(entries);
         } else {
@@ -390,10 +521,10 @@ Port 4: 192.168.40.0/24  - VLAN40 (IoT/センサー系統)`,
       case 'cat': {
         const file = args[1];
         if (!file) { engine.terminal.writeError('cat: ファイルを指定してください'); break; }
-        const content = this.filesystem[file];
-        if (content) {
-          engine.terminal.writeLines(content.split('\n'));
-        } else if (content === null) {
+        const result = lookupFile(file, this.filesystem, this.cwd);
+        if (result.found && result.content) {
+          engine.terminal.writeLines(result.content.split('\n'));
+        } else if (result.found && result.content === null) {
           engine.terminal.writeError(`cat: ${file}: Is a directory`);
         } else {
           engine.terminal.writeError(`cat: ${file}: No such file or directory`);
@@ -472,6 +603,7 @@ export const stage3 = {
     '/mnt/hdd': null,
   },
 
+  cwd: '/',
   availableCommands: ['ls', 'cat', 'mount', 'chmod', 'help'],
   hddMounted: false,
   hddInserted: false,
@@ -540,7 +672,7 @@ export const stage3 = {
       btn.style.display = 'none';
       result.textContent = '無線AP（ポータブル）を発見した！';
       result.style.color = 'var(--green)';
-      engine.engine.addItem({ id: 'wireless_ap', name: '無線AP', icon: '📡' });
+      engine.engine.addItem({ id: 'wireless_ap', name: '無線AP', icon: '📡', hint: '電源制御室のフロアマップに設置して端末を復旧' });
       engine.effects.showNotification('無線AP を入手した', 'item-get');
       engine.renderInventory();
     });
@@ -560,8 +692,9 @@ export const stage3 = {
         ], 'system');
         break;
       case 'ls': {
-        const path = args[1] || '/';
-        const entries = this.getDirectoryEntries(path);
+        const path = args[1] || this.cwd;
+        const resolved = resolvePath(path, this.cwd);
+        const entries = this.getDirectoryEntries(resolved);
         if (entries) {
           engine.terminal.writeLines(entries);
         } else {
@@ -572,11 +705,12 @@ export const stage3 = {
       case 'cat': {
         const file = args[1];
         if (!file) { engine.terminal.writeError('cat: ファイルを指定してください'); break; }
-        let content = this.filesystem[file];
-        if (!content && this.hddMounted) content = this.hddFilesystem[file];
-        if (content) {
-          engine.terminal.writeLines(content.split('\n'));
-        } else if (content === null || (this.hddMounted && this.hddFilesystem[file] === null)) {
+        const allFs = { ...this.filesystem };
+        if (this.hddMounted) Object.assign(allFs, this.hddFilesystem);
+        const result = lookupFile(file, allFs, this.cwd);
+        if (result.found && result.content) {
+          engine.terminal.writeLines(result.content.split('\n'));
+        } else if (result.found && result.content === null) {
           engine.terminal.writeError(`cat: ${file}: Is a directory`);
         } else {
           engine.terminal.writeError(`cat: ${file}: No such file or directory`);
@@ -711,6 +845,7 @@ ai-core.service      → depends on: (なし)
   solved: false,
   foundUSB: false,
 
+  cwd: '/',
   availableCommands: ['ls', 'cat', 'systemctl', 'help'],
 
   render(engine, mainView) {
@@ -881,7 +1016,7 @@ ai-core.service      → depends on: (なし)
       btn.style.display = 'none';
       result.textContent = 'USBメモリを発見した！';
       result.style.color = 'var(--green)';
-      engine.engine.addItem({ id: 'usb', name: 'USBメモリ', icon: '🔑' });
+      engine.engine.addItem({ id: 'usb', name: 'USBメモリ', icon: '🔑', hint: 'AIコアルームの端末に挿入 → mountでマウント' });
       engine.effects.showNotification('USBメモリ を入手した', 'item-get');
       engine.renderInventory();
     });
@@ -901,8 +1036,9 @@ ai-core.service      → depends on: (なし)
         ], 'system');
         break;
       case 'ls': {
-        const path = args[1] || '/';
-        const entries = this.getDirectoryEntries(path);
+        const path = args[1] || this.cwd;
+        const resolved = resolvePath(path, this.cwd);
+        const entries = this.getDirectoryEntries(resolved);
         if (entries) {
           engine.terminal.writeLines(entries);
         } else {
@@ -913,10 +1049,10 @@ ai-core.service      → depends on: (なし)
       case 'cat': {
         const file = args[1];
         if (!file) { engine.terminal.writeError('cat: ファイルを指定してください'); break; }
-        const content = this.filesystem[file];
-        if (content) {
-          engine.terminal.writeLines(content.split('\n'));
-        } else if (content === null) {
+        const result = lookupFile(file, this.filesystem, this.cwd);
+        if (result.found && result.content) {
+          engine.terminal.writeLines(result.content.split('\n'));
+        } else if (result.found && result.content === null) {
           engine.terminal.writeError(`cat: ${file}: Is a directory`);
         } else {
           engine.terminal.writeError(`cat: ${file}: No such file or directory`);
@@ -1040,6 +1176,7 @@ AIが防衛モードに移行する可能性あり。`,
   ],
 
   correctPID: 203,
+  cwd: '/',
   availableCommands: ['ls', 'cat', 'ps', 'kill', 'mount', 'help'],
   usbInserted: false,
   usbMounted: false,
@@ -1126,8 +1263,9 @@ AIが防衛モードに移行する可能性あり。`,
         ], 'system');
         break;
       case 'ls': {
-        const path = args[1] || '/';
-        const entries = this.getDirectoryEntries(path);
+        const path = args[1] || this.cwd;
+        const resolved = resolvePath(path, this.cwd);
+        const entries = this.getDirectoryEntries(resolved);
         if (entries) {
           engine.terminal.writeLines(entries);
         } else {
@@ -1138,11 +1276,12 @@ AIが防衛モードに移行する可能性あり。`,
       case 'cat': {
         const file = args[1];
         if (!file) { engine.terminal.writeError('cat: ファイルを指定してください'); break; }
-        let content = this.filesystem[file];
-        if (!content && this.usbMounted) content = this.usbFilesystem[file];
-        if (content) {
-          engine.terminal.writeLines(content.split('\n'));
-        } else if (content === null || (this.usbMounted && this.usbFilesystem[file] === null)) {
+        const allFs = { ...this.filesystem };
+        if (this.usbMounted) Object.assign(allFs, this.usbFilesystem);
+        const result = lookupFile(file, allFs, this.cwd);
+        if (result.found && result.content) {
+          engine.terminal.writeLines(result.content.split('\n'));
+        } else if (result.found && result.content === null) {
           engine.terminal.writeError(`cat: ${file}: Is a directory`);
         } else {
           engine.terminal.writeError(`cat: ${file}: No such file or directory`);

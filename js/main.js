@@ -3,7 +3,7 @@
 import { GameEngine } from './engine.js';
 import { Terminal } from './terminal.js';
 import { HorrorEffects } from './effects.js';
-import { stage1, stage2, stage3, stage4, stage5 } from './stages.js';
+import { stage1, stage2, stage3, stage4, stage5, buildCompletions } from './stages.js';
 
 class Game {
   constructor() {
@@ -122,8 +122,13 @@ class Game {
     document.getElementById('game-screen').style.display = 'flex';
 
     this.terminal = new Terminal((cmd) => this.processCommand(cmd));
+    this.terminal.onTabComplete = (input) => {
+      const stage = this.engine.getCurrentStage();
+      return buildCompletions(input, stage);
+    };
     this.terminal.writeSystem('=== DEAD PROCESS ===');
     this.terminal.writeSystem('ターミナルにコマンドを入力して進め。"help" でコマンド一覧。');
+    this.terminal.writeSystem('Tabキーでコマンド・パスを補完できる。');
     this.terminal.writeLine('');
 
     this.effects.startAmbient(25000);
@@ -214,7 +219,13 @@ class Game {
     this.engine.inventory.forEach(item => {
       const el = document.createElement('div');
       el.className = `inventory-item ${item.used ? 'used' : ''}`;
+      if (item.hint) el.title = item.hint;
       el.innerHTML = `<span class="item-icon">${item.icon}</span><span>${item.name}</span>`;
+      el.addEventListener('click', () => {
+        if (item.hint) {
+          this.terminal.writeSystem(`[${item.name}] ${item.hint}${item.used ? ' (使用済み)' : ''}`);
+        }
+      });
       container.appendChild(el);
     });
   }
