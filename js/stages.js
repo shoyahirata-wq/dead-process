@@ -2,7 +2,6 @@
 
 // ----- Shared Utilities -----
 
-// Resolve relative path against cwd
 function resolvePath(input, cwd) {
   if (!input) return cwd;
   if (input.startsWith('/')) return input.replace(/\/+$/, '');
@@ -11,54 +10,26 @@ function resolvePath(input, cwd) {
   return resolved.replace(/\/+$/, '');
 }
 
-// Find matching file/dir paths for tab completion
-function getPathCompletions(partial, filesystem, cwd) {
-  const resolved = partial ? resolvePath(partial, cwd) : cwd;
-  const candidates = [];
-
-  // Check exact directory match — list its contents
-  const dirEntries = Object.keys(filesystem).filter(k =>
-    k !== resolved && k.startsWith(resolved + '/')
-    && k.slice(resolved.length + 1).indexOf('/') === -1
-  );
-  if (dirEntries.length > 0) {
-    return dirEntries.map(k => k.split('/').pop());
-  }
-
-  // Prefix match on all paths
-  Object.keys(filesystem).forEach(fullPath => {
-    if (fullPath.startsWith(resolved)) {
-      candidates.push(fullPath);
-    }
-  });
-  return candidates;
-}
-
-// Build tab-completion result for a stage
 function buildCompletions(input, stage) {
   const parts = input.split(/\s+/);
   const allCmds = [...stage.availableCommands, 'clear', 'whoami', 'pwd', 'date', 'uname'];
 
   if (parts.length <= 1) {
-    // Complete command name
     const partial = parts[0] || '';
     const matches = allCmds.filter(c => c.startsWith(partial));
     if (matches.length === 1) {
       return { completed: matches[0] + ' ', candidates: null };
     } else if (matches.length > 1) {
-      // Find longest common prefix
       const prefix = longestCommonPrefix(matches);
       return { completed: prefix, candidates: matches };
     }
     return null;
   }
 
-  // Complete file path (for cat, ls, mount, chmod, systemctl, etc.)
   const cmd = parts[0];
   const partial = parts[parts.length - 1] || '';
   const cwd = stage.cwd || '/';
 
-  // Collect all known paths from filesystem(s)
   const allPaths = { ...stage.filesystem };
   if (stage.hddMounted && stage.hddFilesystem) Object.assign(allPaths, stage.hddFilesystem);
   if (stage.usbMounted && stage.usbFilesystem) Object.assign(allPaths, stage.usbFilesystem);
@@ -67,10 +38,9 @@ function buildCompletions(input, stage) {
   const matches = Object.keys(allPaths).filter(p => p.startsWith(resolved));
 
   if (matches.length === 1) {
-    // Return the full path for absolute, or keep relative style
     const match = matches[0];
     const before = parts.slice(0, -1).join(' ');
-    const suffix = allPaths[match] === null ? '/' : ' '; // dir vs file
+    const suffix = allPaths[match] === null ? '/' : ' ';
     return { completed: before + ' ' + match + suffix, candidates: null };
   } else if (matches.length > 1) {
     const prefix = longestCommonPrefix(matches);
@@ -79,7 +49,6 @@ function buildCompletions(input, stage) {
     return { completed: before + ' ' + prefix, candidates: display };
   }
 
-  // Try completing systemctl service names
   if (cmd === 'systemctl' && stage.services) {
     const action = parts[1];
     if (action === 'stop' && parts.length === 3) {
@@ -110,19 +79,25 @@ function longestCommonPrefix(strings) {
   return prefix;
 }
 
-// Lookup file content, supporting relative paths
 function lookupFile(path, filesystem, cwd) {
   const resolved = resolvePath(path, cwd);
   if (resolved in filesystem) return { found: true, content: filesystem[resolved], resolved };
   return { found: false, resolved };
 }
 
-// Lookup directory entries, supporting relative paths
-function lookupDir(path, dirs, cwd) {
-  const resolved = resolvePath(path, cwd) || '/';
-  return dirs[resolved] || null;
+// Global help lines (appended to every stage help)
+function writeGlobalHelp(terminal) {
+  terminal.writeLines([
+    '',
+    '共通コマンド:',
+    '  clear        - ターミナル画面をクリア',
+    '  pwd          - 現在のディレクトリを表示',
+    '  whoami       - ユーザー名を表示',
+    '  date         - 現在の日時を表示',
+    '  uname        - システム情報を表示',
+    '  help         - このヘルプを表示',
+  ], 'system');
 }
-
 
 export { buildCompletions };
 
@@ -131,14 +106,145 @@ export { buildCompletions };
 export const stage1 = {
   id: 1,
   name: 'Stage 1 — サーバールーム',
-  description: `突然、施設全体にアラートが鳴り響いた。
-サーバールームの扉が自動ロックされ、外部ネットワークは遮断。
-壁のモニターには不気味なメッセージが流れている。
 
-部屋にはサーバーラックとモニター、そして金庫がある。
-金庫のパスコードを入力すれば、次の部屋への扉が開く。
+  roomData: {
+    title: 'サーバールーム',
+    tiles: [
+      [1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+      [1,2,0,2,0,2,0,0,2,0,2,0,0,1],
+      [1,2,0,2,0,2,0,0,2,0,2,0,0,1],
+      [1,0,0,0,0,0,0,0,0,0,0,0,0,1],
+      [1,0,0,0,0,0,0,0,0,0,0,0,0,1],
+      [1,0,0,0,0,0,0,0,0,0,0,0,0,1],
+      [1,0,0,0,0,0,0,0,0,0,0,0,0,1],
+      [1,0,0,0,0,0,0,0,0,0,0,0,0,1],
+      [1,0,0,0,0,0,0,0,0,0,0,0,0,1],
+      [1,1,1,1,1,1,0,1,1,1,1,1,1,1],
+    ],
+    objects: [
+      { x:12, y:1, type:'note', id:'network_diagram', label:'ネットワーク構成図', walkable:false },
+      { x:6, y:4, type:'terminal', id:'terminal', label:'ターミナル', walkable:false },
+      { x:1, y:6, type:'safe', id:'safe', label:'金庫', walkable:false },
+      { x:8, y:7, type:'rack_search', id:'rack_search', label:'サーバーラック裏', walkable:false },
+      { x:11, y:7, type:'note', id:'memo', label:'メモ', walkable:false },
+      { x:6, y:9, type:'door', id:'exit', label:'ドア', walkable:false, unlocked:false },
+    ],
+    playerStart: { x:7, y:8 },
+  },
 
-まずはターミナルで情報を集めよう。（helpでコマンド一覧）`,
+  onInteract(objectId, game) {
+    switch(objectId) {
+      case 'terminal':
+        game.openTerminal();
+        break;
+      case 'safe':
+        game.openPanel('金庫', (container) => this.renderKeypad(game, container));
+        break;
+      case 'rack_search':
+        if (this.foundCable) {
+          game.showMessage('もう調べた。何もない。');
+        } else {
+          this.foundCable = true;
+          game.engine.addItem({ id: 'lan_cable', name: 'LANケーブル', icon: '🔌', hint: 'ネットワーク室でスイッチの配線に使用' });
+          game.effects.showNotification('LANケーブル を入手した', 'item-get');
+          game.renderInventory();
+          game.showMessage('LANケーブル（予備）を発見した！');
+        }
+        break;
+      case 'memo':
+        game.openNote('【メモ】\n金庫のパスコード＝正常に応答しているサーバーのホスト番号の合計\n例: host-01 と host-03 が正常なら → 1 + 3 = 4\n\n※ pingコマンドで各ホストの状態を確認可能');
+        break;
+      case 'network_diagram':
+        game.openNote(
+          '【ネットワーク構成図】\n\n' +
+          'Gateway: 192.168.1.254\n' +
+          '         |\n' +
+          '    Core Switch\n' +
+          '    ┌──┬──┬──┬──┬──┬──┬──┬──┐\n' +
+          '   h01 h02 h03 h04 h05 h06 h07 h08\n\n' +
+          'IPアドレス: 192.168.1.[ホスト番号]\n' +
+          '  host-01: 192.168.1.1\n' +
+          '  host-02: 192.168.1.2\n' +
+          '  host-03: 192.168.1.3\n' +
+          '  host-04: 192.168.1.4\n' +
+          '  host-05: 192.168.1.5\n' +
+          '  host-06: 192.168.1.6\n' +
+          '  host-07: 192.168.1.7\n' +
+          '  host-08: 192.168.1.8\n\n' +
+          '※ pingコマンドで各ホストの状態を確認可能'
+        );
+        break;
+      case 'exit':
+        if (this.solved) {
+          if (!game.engine.hasItem('lan_cable') && !this.foundCable) {
+            game.terminal.writeSystem('[HINT] ラックの裏もまだ調べていないようだ...');
+          }
+          game.engine.nextStage();
+        } else {
+          game.showMessage('ロックされている。金庫を開けて解除しろ。');
+        }
+        break;
+    }
+  },
+
+  renderKeypad(game, container) {
+    container.innerHTML = `
+      <div class="keypad">
+        <p style="color:var(--amber);font-size:12px;margin-bottom:12px;">【金庫】パスコードを入力</p>
+        <div class="keypad-display" id="keypad-display">${this.keypadValue.padEnd(4, '_')}</div>
+        <div class="keypad-buttons">
+          ${[1,2,3,4,5,6,7,8,9].map(n =>
+            `<button class="keypad-btn" data-num="${n}">${n}</button>`
+          ).join('')}
+          <button class="keypad-btn clear" data-action="clear">C</button>
+          <button class="keypad-btn" data-num="0">0</button>
+          <button class="keypad-btn enter" data-action="enter">ENTER</button>
+        </div>
+      </div>`;
+
+    container.querySelectorAll('.keypad-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        if (this.solved) return;
+        const num = btn.dataset.num;
+        const action = btn.dataset.action;
+        const display = document.getElementById('keypad-display');
+
+        if (num !== undefined) {
+          if (this.keypadValue.length < 4) {
+            this.keypadValue += num;
+            display.textContent = this.keypadValue.padEnd(4, '_');
+          }
+        } else if (action === 'clear') {
+          this.keypadValue = '';
+          display.textContent = '____';
+        } else if (action === 'enter') {
+          if (parseInt(this.keypadValue) === this.answer) {
+            this.solved = true;
+            display.textContent = 'OK!!';
+            display.style.color = 'var(--green)';
+            display.style.textShadow = '0 0 10px var(--green)';
+            game.effects.flash();
+            game.terminal.writeSuccess('[SYSTEM] 金庫が開いた。次の部屋への扉がアンロックされた。');
+            // Update door object
+            const door = game.room.getObject('exit');
+            if (door) door.unlocked = true;
+            setTimeout(() => game.closePanel(), 1000);
+          } else {
+            display.textContent = 'ERR!';
+            display.style.color = 'var(--red)';
+            game.effects.glitch();
+            game.terminal.writeAI('> アクセス拒否。パスコードが違います。');
+            setTimeout(() => {
+              this.keypadValue = '';
+              display.textContent = '____';
+              display.style.color = 'var(--green)';
+              display.style.textShadow = 'none';
+            }, 1000);
+          }
+        }
+      });
+    });
+  },
 
   filesystem: {
     '/var/log/syslog': `[03:21:01] host-01: connection refused (port 22)
@@ -176,118 +282,22 @@ export const stage1 = {
 
   cwd: '/home/user',
   availableCommands: ['ls', 'cat', 'ping', 'help'],
-  answer: 13, // 2 + 4 + 7
+  answer: 13,
   keypadValue: '',
   solved: false,
   foundCable: false,
-
-  render(engine, mainView) {
-    mainView.innerHTML = `
-      <div class="room-description">${this.description.replace(/\n/g, '<br>')}</div>
-      <div class="interactive-area">
-        <div style="display:flex; gap:30px; align-items:flex-start; flex-wrap:wrap;">
-          <div>
-            <p style="color:var(--amber);font-size:12px;margin-bottom:8px;">【金庫】</p>
-            <div class="keypad">
-              <div class="keypad-display" id="keypad-display">____</div>
-              <div class="keypad-buttons">
-                ${[1,2,3,4,5,6,7,8,9].map(n =>
-                  `<button class="keypad-btn" data-num="${n}">${n}</button>`
-                ).join('')}
-                <button class="keypad-btn clear" data-action="clear">C</button>
-                <button class="keypad-btn" data-num="0">0</button>
-                <button class="keypad-btn enter" data-action="enter">ENTER</button>
-              </div>
-            </div>
-          </div>
-          <div>
-            <p style="color:var(--amber);font-size:12px;margin-bottom:8px;">【サーバーラック】</p>
-            <button id="search-rack" style="background:#111;border:1px solid #333;color:var(--text);padding:8px 16px;cursor:pointer;font-family:var(--font-mono);font-size:12px;">
-              ラックの裏を調べる
-            </button>
-            <p id="rack-result" style="margin-top:8px;font-size:12px;"></p>
-          </div>
-        </div>
-      </div>`;
-
-    this.keypadValue = '';
-    this.bindKeypad(engine);
-    this.bindRack(engine);
-  },
-
-  bindKeypad(engine) {
-    const display = document.getElementById('keypad-display');
-    document.querySelectorAll('.keypad-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        if (this.solved) return;
-        const num = btn.dataset.num;
-        const action = btn.dataset.action;
-        if (num !== undefined) {
-          if (this.keypadValue.length < 4) {
-            this.keypadValue += num;
-            display.textContent = this.keypadValue.padEnd(4, '_');
-          }
-        } else if (action === 'clear') {
-          this.keypadValue = '';
-          display.textContent = '____';
-        } else if (action === 'enter') {
-          if (parseInt(this.keypadValue) === this.answer) {
-            this.solved = true;
-            display.textContent = 'OK!!';
-            display.style.color = 'var(--green)';
-            display.style.textShadow = '0 0 10px var(--green)';
-            engine.effects.flash();
-            engine.terminal.writeSuccess('[SYSTEM] 金庫が開いた。次の部屋への扉がアンロックされた。');
-            if (!engine.engine.hasItem('lan_cable') && !this.foundCable) {
-              engine.terminal.writeSystem('[HINT] ラックの裏もまだ調べていないようだ...');
-            }
-            setTimeout(() => {
-              engine.terminal.writeSystem('[SYSTEM] Enterキーで次の部屋へ進む...');
-              engine.waitForEnter(() => engine.engine.nextStage());
-            }, 1000);
-          } else {
-            display.textContent = 'ERR!';
-            display.style.color = 'var(--red)';
-            engine.effects.glitch();
-            engine.terminal.writeAI('> アクセス拒否。パスコードが違います。');
-            setTimeout(() => {
-              this.keypadValue = '';
-              display.textContent = '____';
-              display.style.color = 'var(--green)';
-              display.style.textShadow = 'none';
-            }, 1000);
-          }
-        }
-      });
-    });
-  },
-
-  bindRack(engine) {
-    const btn = document.getElementById('search-rack');
-    const result = document.getElementById('rack-result');
-    btn.addEventListener('click', () => {
-      if (this.foundCable) return;
-      this.foundCable = true;
-      btn.style.display = 'none';
-      result.textContent = 'LANケーブル（予備）を発見した！';
-      result.style.color = 'var(--green)';
-      engine.engine.addItem({ id: 'lan_cable', name: 'LANケーブル', icon: '🔌', hint: 'ネットワーク室でスイッチの配線に使用' });
-      engine.effects.showNotification('LANケーブル を入手した', 'item-get');
-      engine.renderInventory();
-    });
-  },
 
   processCommand(args, engine) {
     const cmd = args[0];
     switch (cmd) {
       case 'help':
         engine.terminal.writeLines([
-          '使用可能なコマンド:',
+          'ステージコマンド:',
           '  ls [path]    - ディレクトリ内容を表示',
           '  cat <file>   - ファイル内容を表示',
           '  ping <host>  - ホストの死活確認',
-          '  help         - このヘルプを表示',
         ], 'system');
+        writeGlobalHelp(engine.terminal);
         break;
       case 'ls': {
         const path = args[1] || this.cwd;
@@ -361,11 +371,128 @@ export const stage1 = {
 export const stage2 = {
   id: 2,
   name: 'Stage 2 — ネットワーク室',
-  description: `ネットワーク機器が並ぶ部屋に入った。
-監視カメラがこちらの動きを追っている——AIに制御されているようだ。
 
-スイッチの配線を操作して、カメラ系統のネットワークだけを切断しろ。
-ただし、管理系統を切ると脱出ルートが閉ざされる。`,
+  roomData: {
+    title: 'ネットワーク室',
+    tiles: [
+      [1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+      [1,0,0,0,0,0,0,0,0,0,0,0,0,1],
+      [1,0,0,0,0,0,0,0,0,0,0,0,0,1],
+      [1,0,0,0,0,0,0,0,0,0,0,0,0,1],
+      [1,0,0,0,0,0,0,0,0,0,0,0,0,1],
+      [1,0,0,0,0,0,0,0,0,0,0,0,0,1],
+      [1,0,0,0,0,0,0,0,0,0,0,0,0,1],
+      [1,0,0,0,0,0,0,0,0,0,0,0,0,1],
+      [1,0,0,0,0,0,0,0,0,0,0,0,0,1],
+      [1,1,1,1,1,1,0,1,1,1,1,1,1,1],
+    ],
+    objects: [
+      { x:3, y:2, type:'switch_panel', id:'switch_panel', label:'ネットワークスイッチ', walkable:false },
+      { x:10, y:2, type:'camera', id:'camera', label:'監視カメラ', walkable:false, interactable:false, disabled:false },
+      { x:10, y:7, type:'desk', id:'desk', label:'デスク', walkable:false },
+      { x:6, y:4, type:'terminal', id:'terminal', label:'ターミナル', walkable:false },
+      { x:6, y:9, type:'door', id:'exit', label:'ドア', walkable:false, unlocked:false },
+    ],
+    playerStart: { x:6, y:8 },
+  },
+
+  onInteract(objectId, game) {
+    switch(objectId) {
+      case 'terminal':
+        game.openTerminal();
+        break;
+      case 'switch_panel':
+        game.openPanel('ネットワークスイッチ', (container) => this.renderSwitch(game, container));
+        break;
+      case 'desk':
+        if (this.foundHDD) {
+          game.showMessage('もう調べた。何もない。');
+        } else {
+          this.foundHDD = true;
+          game.engine.addItem({ id: 'hdd', name: 'HDD', icon: '💾', hint: 'ストレージ室の端末に挿入 → mountでマウント' });
+          game.effects.showNotification('HDD を入手した', 'item-get');
+          game.renderInventory();
+          game.showMessage('引き出しからHDD（2.5インチ SATA）を発見した！');
+        }
+        break;
+      case 'exit':
+        if (this.solved) {
+          game.engine.nextStage();
+        } else {
+          game.showMessage('カメラが動いている。まだ脱出できない。');
+        }
+        break;
+    }
+  },
+
+  renderSwitch(game, container) {
+    container.innerHTML = `
+      <div>
+        <p style="color:var(--amber);font-size:12px;margin-bottom:12px;">【ネットワークスイッチ】ポートをクリックしてケーブルを抜き差し</p>
+        <div class="switch-diagram">
+          <div class="switch-box">
+            <h3>Core Switch</h3>
+            <div id="port-list">
+              ${this.ports.map(p => `
+                <div class="port ${p.connected ? 'connected' : 'disconnected'}" data-port-id="${p.id}" id="port-${p.id}">
+                  <span class="port-indicator"></span>
+                  <span>${p.name}</span>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+          <div style="color:#555;font-size:12px;">
+            <div id="camera-status" style="color:${this.solved ? 'var(--green)' : 'var(--red)'};">
+              📹 カメラ: ${this.solved ? 'オフライン' : 'オンライン'}
+            </div>
+            <div id="robot-warning" style="margin-top:8px;display:${this.wrongAttempts > 0 ? '' : 'none'};color:var(--red);">
+              ${this.wrongAttempts > 0 ? `⚠ ロボットが接近中... (誤操作: ${this.wrongAttempts}回)` : ''}
+            </div>
+          </div>
+        </div>
+      </div>`;
+
+    this.ports.forEach(p => {
+      const el = document.getElementById(`port-${p.id}`);
+      el.addEventListener('click', () => {
+        if (this.solved) return;
+        p.connected = !p.connected;
+        el.className = `port ${p.connected ? 'connected' : 'disconnected'}`;
+
+        if (p.network === 'camera' && !p.connected) {
+          const othersOk = this.ports.filter(x => x.network !== 'camera').every(x => x.connected);
+          if (othersOk) {
+            this.solved = true;
+            document.getElementById('camera-status').innerHTML = '📹 カメラ: <span style="color:var(--green)">オフライン</span>';
+            game.effects.flash();
+            game.terminal.writeSuccess('[SYSTEM] カメラ系統を切断した。AIの追跡が停止。');
+            game.terminal.writeSystem('[SYSTEM] 次の部屋への扉がアンロックされた。');
+            const door = game.room.getObject('exit');
+            if (door) door.unlocked = true;
+            const cam = game.room.getObject('camera');
+            if (cam) cam.disabled = true;
+            setTimeout(() => game.closePanel(), 1500);
+          }
+        } else if (p.network === 'management' && !p.connected) {
+          this.wrongAttempts++;
+          game.effects.screenShake();
+          game.terminal.writeAI('> 管理系統を切断？　脱出ルートが閉ざされるところだった。');
+          game.terminal.writeError('[WARNING] 管理系統の切断は危険です。再接続してください。');
+          p.connected = true;
+          el.className = 'port connected';
+        } else if (!p.connected && p.network !== 'camera') {
+          this.wrongAttempts++;
+          game.effects.glitch();
+          const warn = document.getElementById('robot-warning');
+          warn.style.display = '';
+          warn.textContent = `⚠ ロボットが接近中... (誤操作: ${this.wrongAttempts}回)`;
+          game.terminal.writeAI('> 間違ったポートを触っていますね。');
+          p.connected = true;
+          el.className = 'port connected';
+        }
+      });
+    });
+  },
 
   filesystem: {
     '/etc/network/switch_config.txt': `[Switch Port Configuration]
@@ -402,110 +529,17 @@ Port 4: 192.168.40.0/24  - VLAN40 (IoT/センサー系統)`,
   foundHDD: false,
   wrongAttempts: 0,
 
-  render(engine, mainView) {
-    mainView.innerHTML = `
-      <div class="room-description">${this.description.replace(/\n/g, '<br>')}</div>
-      <div class="interactive-area">
-        <p style="color:var(--amber);font-size:12px;margin-bottom:12px;">【ネットワークスイッチ】ポートをクリックしてケーブルを抜き差し</p>
-        <div class="switch-diagram">
-          <div class="switch-box">
-            <h3>Core Switch</h3>
-            <div id="port-list">
-              ${this.ports.map(p => `
-                <div class="port connected" data-port-id="${p.id}" id="port-${p.id}">
-                  <span class="port-indicator"></span>
-                  <span>${p.name}</span>
-                </div>
-              `).join('')}
-            </div>
-          </div>
-          <div style="color:#555;font-size:12px;">
-            <div id="camera-status" style="color:var(--red);">📹 カメラ: オンライン</div>
-            <div id="robot-warning" style="margin-top:8px;display:none;color:var(--red);"></div>
-          </div>
-        </div>
-        <div style="margin-top:16px;">
-          <p style="color:var(--amber);font-size:12px;margin-bottom:8px;">【デスク】</p>
-          <button id="search-desk" style="background:#111;border:1px solid #333;color:var(--text);padding:8px 16px;cursor:pointer;font-family:var(--font-mono);font-size:12px;">
-            引き出しを調べる
-          </button>
-          <p id="desk-result" style="margin-top:8px;font-size:12px;"></p>
-        </div>
-      </div>`;
-
-    this.bindPorts(engine);
-    this.bindDesk(engine);
-  },
-
-  bindPorts(engine) {
-    this.ports.forEach(p => {
-      const el = document.getElementById(`port-${p.id}`);
-      el.addEventListener('click', () => {
-        if (this.solved) return;
-        p.connected = !p.connected;
-        el.className = `port ${p.connected ? 'connected' : 'disconnected'}`;
-
-        if (p.network === 'camera' && !p.connected) {
-          // Check: only camera should be disconnected
-          const othersOk = this.ports.filter(x => x.network !== 'camera').every(x => x.connected);
-          if (othersOk) {
-            this.solved = true;
-            document.getElementById('camera-status').innerHTML = '📹 カメラ: <span style="color:var(--green)">オフライン</span>';
-            engine.effects.flash();
-            engine.terminal.writeSuccess('[SYSTEM] カメラ系統を切断した。AIの追跡が停止。');
-            engine.terminal.writeSystem('[SYSTEM] 次の部屋への扉がアンロックされた。');
-            setTimeout(() => {
-              engine.terminal.writeSystem('[SYSTEM] Enterキーで次の部屋へ進む...');
-              engine.waitForEnter(() => engine.engine.nextStage());
-            }, 1000);
-          }
-        } else if (p.network === 'management' && !p.connected) {
-          this.wrongAttempts++;
-          engine.effects.screenShake();
-          engine.terminal.writeAI('> 管理系統を切断？　脱出ルートが閉ざされるところだった。');
-          engine.terminal.writeError('[WARNING] 管理系統の切断は危険です。再接続してください。');
-          p.connected = true;
-          el.className = 'port connected';
-        } else if (!p.connected && p.network !== 'camera') {
-          this.wrongAttempts++;
-          engine.effects.glitch();
-          const warn = document.getElementById('robot-warning');
-          warn.style.display = '';
-          warn.textContent = `⚠ ロボットが接近中... (誤操作: ${this.wrongAttempts}回)`;
-          engine.terminal.writeAI('> 間違ったポートを触っていますね。');
-          p.connected = true;
-          el.className = 'port connected';
-        }
-      });
-    });
-  },
-
-  bindDesk(engine) {
-    const btn = document.getElementById('search-desk');
-    const result = document.getElementById('desk-result');
-    btn.addEventListener('click', () => {
-      if (this.foundHDD) return;
-      this.foundHDD = true;
-      btn.style.display = 'none';
-      result.textContent = 'HDD（2.5インチ SATA）を発見した！';
-      result.style.color = 'var(--green)';
-      engine.engine.addItem({ id: 'hdd', name: 'HDD', icon: '💾', hint: 'ストレージ室の端末に挿入 → mountでマウント' });
-      engine.effects.showNotification('HDD を入手した', 'item-get');
-      engine.renderInventory();
-    });
-  },
-
   processCommand(args, engine) {
     const cmd = args[0];
     switch (cmd) {
       case 'help':
         engine.terminal.writeLines([
-          '使用可能なコマンド:',
+          'ステージコマンド:',
           '  ls [path]    - ディレクトリ内容を表示',
           '  cat <file>   - ファイル内容を表示',
           '  ip a         - ネットワークインターフェース情報',
-          '  help         - このヘルプを表示',
         ], 'system');
+        writeGlobalHelp(engine.terminal);
         break;
       case 'ls': {
         const path = args[1] || this.cwd;
@@ -571,10 +605,94 @@ Port 4: 192.168.40.0/24  - VLAN40 (IoT/センサー系統)`,
 export const stage3 = {
   id: 3,
   name: 'Stage 3 — ストレージ室',
-  description: `薄暗いストレージ室。棚にはバックアップメディアが並んでいる。
-奥の扉はアクセス権限でロックされているようだ。
 
-端末にHDDスロットがある。手持ちのHDDを接続すればヒントが得られるかもしれない。`,
+  roomData: {
+    title: 'ストレージ室',
+    tiles: [
+      [1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+      [1,0,0,0,0,0,0,0,0,0,0,0,0,1],
+      [1,0,0,0,0,0,0,0,0,0,0,0,0,1],
+      [1,0,0,0,0,0,0,0,0,0,0,0,0,1],
+      [1,0,0,0,0,0,0,0,0,0,0,0,0,1],
+      [1,0,0,0,0,0,0,0,0,0,0,0,0,1],
+      [1,0,0,0,0,0,0,0,0,0,0,0,0,1],
+      [1,0,0,0,0,0,0,0,0,0,0,0,0,1],
+      [1,0,0,0,0,0,0,0,0,0,0,0,0,1],
+      [1,1,1,1,1,1,0,1,1,1,1,1,1,1],
+    ],
+    objects: [
+      { x:3, y:2, type:'hdd_slot', id:'hdd_slot', label:'HDDスロット', walkable:false, filled:false },
+      { x:10, y:2, type:'note', id:'door_readme', label:'ドアロック説明', walkable:false },
+      { x:6, y:4, type:'terminal', id:'terminal', label:'ターミナル', walkable:false },
+      { x:11, y:6, type:'shelf', id:'shelf', label:'棚', walkable:false },
+      { x:2, y:7, type:'door_perm', id:'door_status', label:'ドアロック', walkable:false, unlocked:false, perms:'000' },
+      { x:6, y:9, type:'door', id:'exit', label:'ドア', walkable:false, unlocked:false },
+    ],
+    playerStart: { x:7, y:8 },
+  },
+
+  onInteract(objectId, game) {
+    switch(objectId) {
+      case 'terminal':
+        game.openTerminal();
+        break;
+      case 'hdd_slot': {
+        if (this.hddInserted) {
+          game.showMessage('HDD は既に接続されている。');
+          break;
+        }
+        if (!game.engine.hasItem('hdd')) {
+          game.showMessage('HDDを持っていない。');
+          break;
+        }
+        this.hddInserted = true;
+        game.engine.useItem('hdd');
+        const slot = game.room.getObject('hdd_slot');
+        if (slot) slot.filled = true;
+        game.effects.showNotification('HDDを端末に接続した', 'item-get');
+        game.terminal.writeSystem('[SYSTEM] /dev/sdb1 が検出されました。mountコマンドでマウントしてください。');
+        game.renderInventory();
+        break;
+      }
+      case 'door_readme':
+        game.openNote(
+          '【ドアロック制御ファイル】\n' +
+          'ドアの解錠には、door_lock に対して\n' +
+          '所有者(owner)の「読み取り」と「実行」権限の付与が必要です。\n\n' +
+          '現在のパーミッション: ----------  (000)\n' +
+          '必要: 所有者 = r + x / グループ = なし / その他 = なし\n\n' +
+          'ヒント: chmod コマンドで権限を変更せよ\n' +
+          '  chmod 500 /sys/door/door_lock\n' +
+          '  または chmod u+rx /sys/door/door_lock'
+        );
+        break;
+      case 'shelf':
+        if (this.foundAP) {
+          game.showMessage('もう調べた。何もない。');
+        } else {
+          this.foundAP = true;
+          game.engine.addItem({ id: 'wireless_ap', name: '無線AP', icon: '📡', hint: '電源制御室のフロアマップに設置して端末を復旧' });
+          game.effects.showNotification('無線AP を入手した', 'item-get');
+          game.renderInventory();
+          game.showMessage('無線AP（ポータブル）を発見した！');
+        }
+        break;
+      case 'door_status':
+        if (this.doorUnlocked) {
+          game.showMessage('ドアロック: 解除済み');
+        } else {
+          game.showMessage(`ドアロック: パーミッション ${this.currentPerms} — 不正`);
+        }
+        break;
+      case 'exit':
+        if (this.doorUnlocked) {
+          game.engine.nextStage();
+        } else {
+          game.showMessage('アクセス権限でロックされている。chmodで解除しろ。');
+        }
+        break;
+    }
+  },
 
   filesystem: {
     '/sys/door/README': `【ドアロック制御ファイル】
@@ -611,85 +729,18 @@ export const stage3 = {
   foundAP: false,
   currentPerms: '000',
 
-  render(engine, mainView) {
-    mainView.innerHTML = `
-      <div class="room-description">${this.description.replace(/\n/g, '<br>')}</div>
-      <div class="interactive-area">
-        <div style="display:flex; gap:30px; flex-wrap:wrap;">
-          <div>
-            <p style="color:var(--amber);font-size:12px;margin-bottom:8px;">【端末 HDDスロット】</p>
-            <div class="hdd-slot" id="hdd-slot">
-              ${engine.engine.hasItem('hdd') && !this.hddInserted ? 'クリックでHDDを挿入' : this.hddInserted ? '💾 HDD 接続中' : 'HDDが必要'}
-            </div>
-          </div>
-          <div>
-            <p style="color:var(--amber);font-size:12px;margin-bottom:8px;">【ドアロック状態】</p>
-            <div id="door-status" style="font-size:12px;color:${this.doorUnlocked ? 'var(--green)' : 'var(--red)'};">
-              ${this.doorUnlocked ? '🔓 UNLOCKED' : '🔒 LOCKED — パーミッション: ' + this.currentPerms}
-            </div>
-          </div>
-          <div>
-            <p style="color:var(--amber);font-size:12px;margin-bottom:8px;">【棚】</p>
-            <button id="search-shelf" style="background:#111;border:1px solid #333;color:var(--text);padding:8px 16px;cursor:pointer;font-family:var(--font-mono);font-size:12px;">
-              棚を調べる
-            </button>
-            <p id="shelf-result" style="margin-top:8px;font-size:12px;"></p>
-          </div>
-        </div>
-      </div>`;
-
-    this.bindHDDSlot(engine);
-    this.bindShelf(engine);
-    if (this.hddInserted) {
-      document.getElementById('hdd-slot').classList.add('filled');
-    }
-  },
-
-  bindHDDSlot(engine) {
-    const slot = document.getElementById('hdd-slot');
-    slot.addEventListener('click', () => {
-      if (this.hddInserted) return;
-      if (!engine.engine.hasItem('hdd')) {
-        engine.terminal.writeError('[SYSTEM] HDDを持っていない。');
-        return;
-      }
-      this.hddInserted = true;
-      engine.engine.useItem('hdd');
-      slot.classList.add('filled');
-      slot.textContent = '💾 HDD 接続中';
-      engine.effects.showNotification('HDDを端末に接続した', 'item-get');
-      engine.terminal.writeSystem('[SYSTEM] /dev/sdb1 が検出されました。mountコマンドでマウントしてください。');
-      engine.renderInventory();
-    });
-  },
-
-  bindShelf(engine) {
-    const btn = document.getElementById('search-shelf');
-    const result = document.getElementById('shelf-result');
-    btn.addEventListener('click', () => {
-      if (this.foundAP) return;
-      this.foundAP = true;
-      btn.style.display = 'none';
-      result.textContent = '無線AP（ポータブル）を発見した！';
-      result.style.color = 'var(--green)';
-      engine.engine.addItem({ id: 'wireless_ap', name: '無線AP', icon: '📡', hint: '電源制御室のフロアマップに設置して端末を復旧' });
-      engine.effects.showNotification('無線AP を入手した', 'item-get');
-      engine.renderInventory();
-    });
-  },
-
   processCommand(args, engine) {
     const cmd = args[0];
     switch (cmd) {
       case 'help':
         engine.terminal.writeLines([
-          '使用可能なコマンド:',
+          'ステージコマンド:',
           '  ls [path]     - ディレクトリ内容を表示',
           '  cat <file>    - ファイル内容を表示',
           '  mount <dev> <dir> - デバイスをマウント',
           '  chmod <mode> <file> - パーミッション変更',
-          '  help          - このヘルプを表示',
         ], 'system');
+        writeGlobalHelp(engine.terminal);
         break;
       case 'ls': {
         const path = args[1] || this.cwd;
@@ -749,21 +800,19 @@ export const stage3 = {
           break;
         }
         if (file === '/sys/door/door_lock' || file === 'door_lock') {
-          // Accept 500, r-x------, u+rx, etc.
           if (mode === '500' || mode === 'u+rx' || mode === 'u=rx') {
             this.doorUnlocked = true;
             this.currentPerms = '500';
-            document.getElementById('door-status').innerHTML = '🔓 UNLOCKED';
-            document.getElementById('door-status').style.color = 'var(--green)';
+            const doorObj = engine.room.getObject('door_status');
+            if (doorObj) { doorObj.unlocked = true; doorObj.perms = '500'; }
+            const exitObj = engine.room.getObject('exit');
+            if (exitObj) exitObj.unlocked = true;
             engine.effects.flash();
             engine.terminal.writeSuccess('[SYSTEM] パーミッション変更完了。ドアがアンロックされた。');
-            setTimeout(() => {
-              engine.terminal.writeSystem('[SYSTEM] Enterキーで次の部屋へ進む...');
-              engine.waitForEnter(() => engine.engine.nextStage());
-            }, 1000);
           } else {
             this.currentPerms = mode;
-            document.getElementById('door-status').innerHTML = `🔒 LOCKED — パーミッション: ${mode} (不正)`;
+            const doorObj = engine.room.getObject('door_status');
+            if (doorObj) doorObj.perms = mode;
             engine.terminal.writeError(`[SYSTEM] パーミッション ${mode} ではドアは開きません。`);
             engine.effects.glitch();
             engine.terminal.writeAI('> 権限が足りないようですね。永遠にここにいてもいいんですよ。');
@@ -797,102 +846,86 @@ export const stage3 = {
 export const stage4 = {
   id: 4,
   name: 'Stage 4 — 電源制御室',
-  description: `電源制御室。AIがネットワークを切断し、端末が全てオフラインだ。
-無線APを設置して端末を復旧し、サービスを正しい順序で停止せよ。
 
-制限時間あり。急げ。`,
-
-  filesystem: {
-    '/etc/systemd/dependencies.txt': `[サービス依存関係]
-ai-monitor.service   → depends on: ai-network.service
-ai-sensor.service    → depends on: ai-network.service
-ai-network.service   → depends on: ai-core.service
-ai-core.service      → depends on: (なし)
-
-※依存される側を先に停止すると、依存するサービスが暴走する恐れあり
-※正しい停止順序: 依存する側(葉)から順に停止すること`,
-    '/var/log/power.log': `[03:30:01] 電源系統A: 正常
-[03:30:02] 電源系統B: 正常
-[03:30:03] AI-CORE: 電力消費量 異常上昇中
-[03:30:05] WARNING: AI制御による電力再分配を検出`,
-    '/etc/systemd': null,
-    '/etc': null,
-    '/var/log': null,
+  roomData: {
+    title: '電源制御室',
+    tiles: [
+      [1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+      [1,0,0,0,0,0,0,0,0,0,0,0,0,1],
+      [1,0,0,0,0,0,0,0,0,0,0,0,0,1],
+      [1,0,0,0,0,0,0,0,0,0,0,0,0,1],
+      [1,0,0,0,0,0,0,0,0,0,0,0,0,1],
+      [1,0,0,0,0,0,0,0,0,0,0,0,0,1],
+      [1,0,0,0,0,0,0,0,0,0,0,0,0,1],
+      [1,0,0,0,0,0,0,0,0,0,0,0,0,1],
+      [1,0,0,0,0,0,0,0,0,0,0,0,0,1],
+      [1,1,1,1,1,1,0,1,1,1,1,1,1,1],
+    ],
+    objects: [
+      { x:3, y:2, type:'floor_map', id:'floor_map', label:'フロアマップ', walkable:false },
+      { x:10, y:2, type:'terminal', id:'terminal', label:'ターミナル', walkable:false },
+      { x:10, y:6, type:'desk', id:'desk', label:'デスク', walkable:false },
+      { x:6, y:9, type:'door', id:'exit', label:'ドア', walkable:false, unlocked:false },
+    ],
+    playerStart: { x:7, y:8 },
   },
 
-  // Floor map: 8x6 grid
-  // 0 = empty, 1 = wall, 2 = terminal, 3 = AP placed
-  floorMap: [
-    [0,0,0,0,1,0,0,0],
-    [0,2,0,0,1,0,2,0],
-    [0,0,0,0,0,0,0,0],
-    [0,0,1,1,1,1,0,0],
-    [0,2,0,0,0,0,2,0],
-    [0,0,0,0,0,0,0,0],
-  ],
-  terminals: [{r:1,c:1},{r:1,c:6},{r:4,c:1},{r:4,c:6}],
-  apPlaced: null,
-  apRange: 3,
-  networkRestored: false,
-
-  services: [
-    { name: 'ai-monitor.service', running: true, dependsOn: 'ai-network.service' },
-    { name: 'ai-sensor.service', running: true, dependsOn: 'ai-network.service' },
-    { name: 'ai-network.service', running: true, dependsOn: 'ai-core.service' },
-    { name: 'ai-core.service', running: true, dependsOn: null },
-  ],
-  stopOrder: [],
-  solved: false,
-  foundUSB: false,
-
-  cwd: '/',
-  availableCommands: ['ls', 'cat', 'systemctl', 'help'],
-
-  render(engine, mainView) {
-    mainView.innerHTML = `
-      <div class="room-description">${this.description.replace(/\n/g, '<br>')}</div>
-      <div class="interactive-area">
-        <div style="display:flex; gap:24px; flex-wrap:wrap;">
-          <div>
-            <p style="color:var(--amber);font-size:12px;margin-bottom:8px;">
-              【フロアマップ】無線APを配置せよ（クリックで設置）
-            </p>
-            <div class="floor-map" id="floor-map"></div>
-            <p id="ap-status" style="font-size:11px;margin-top:8px;color:#555;">
-              ${this.networkRestored ? '✓ 全端末がオンライン' : 'APを設置して全端末をカバーせよ'}
-            </p>
-          </div>
-          <div>
-            <p style="color:var(--amber);font-size:12px;margin-bottom:8px;">【サービス状態】</p>
-            <div class="service-list" id="service-list"></div>
-            <div style="margin-top:16px;">
-              <p style="color:var(--amber);font-size:12px;margin-bottom:8px;">【デスク】</p>
-              <button id="search-desk4" style="background:#111;border:1px solid #333;color:var(--text);padding:8px 16px;cursor:pointer;font-family:var(--font-mono);font-size:12px;">
-                デスクを調べる
-              </button>
-              <p id="desk4-result" style="margin-top:8px;font-size:12px;"></p>
-            </div>
-          </div>
-        </div>
-      </div>`;
-
-    this.renderFloorMap(engine);
-    this.renderServices();
-    this.bindDesk(engine);
-
-    // Start timer
-    if (!engine.engine.timer) {
-      engine.engine.startTimer(180, () => {
-        engine.effects.screenShake();
-        engine.effects.flash();
-        engine.terminal.writeAI('> 時間切れです。ロボットが到着しました。');
-        engine.terminal.writeAI('> あなたのプロセスを終了します。');
-        setTimeout(() => engine.engine.endGame('bad'), 2000);
-      });
+  onInteract(objectId, game) {
+    switch(objectId) {
+      case 'terminal':
+        game.openTerminal();
+        break;
+      case 'floor_map':
+        if (!game.engine.hasItem('wireless_ap') && !this.networkRestored) {
+          game.showMessage('無線APが必要だ。');
+          break;
+        }
+        game.openPanel('フロアマップ — 無線AP配置', (container) => this.renderFloorMapPanel(game, container));
+        break;
+      case 'desk':
+        if (this.foundUSB) {
+          game.showMessage('もう調べた。何もない。');
+        } else {
+          this.foundUSB = true;
+          game.engine.addItem({ id: 'usb', name: 'USBメモリ', icon: '🔑', hint: 'AIコアルームの端末に挿入 → mountでマウント' });
+          game.effects.showNotification('USBメモリ を入手した', 'item-get');
+          game.renderInventory();
+          game.showMessage('USBメモリを発見した！');
+        }
+        break;
+      case 'exit':
+        if (this.solved) {
+          game.engine.nextStage();
+        } else {
+          game.showMessage('サービスが停止されていない。');
+        }
+        break;
     }
   },
 
-  renderFloorMap(engine) {
+  renderFloorMapPanel(game, container) {
+    container.innerHTML = `
+      <div>
+        <p style="color:var(--amber);font-size:12px;margin-bottom:8px;">
+          クリックで無線APを配置（全端末をカバーせよ）
+        </p>
+        <div class="floor-map" id="floor-map"></div>
+        <p id="ap-status" style="font-size:11px;margin-top:8px;color:#555;">
+          ${this.networkRestored ? '✓ 全端末がオンライン' : 'APを設置して全端末をカバーせよ'}
+        </p>
+        ${this.networkRestored ? `
+          <div style="margin-top:16px;">
+            <p style="color:var(--amber);font-size:12px;margin-bottom:8px;">【サービス状態】</p>
+            <div class="service-list" id="service-list"></div>
+          </div>
+        ` : ''}
+      </div>`;
+
+    this._renderFloorMap(game);
+    if (this.networkRestored) this._renderServices();
+  },
+
+  _renderFloorMap(game) {
     const mapEl = document.getElementById('floor-map');
     if (!mapEl) return;
     mapEl.innerHTML = '';
@@ -925,7 +958,7 @@ ai-core.service      → depends on: (なし)
         }
 
         if (val !== 1 && val !== 2 && !this.networkRestored) {
-          cell.addEventListener('click', () => this.placeAP(r, c, engine));
+          cell.addEventListener('click', () => this._placeAP(r, c, game));
         }
 
         mapEl.appendChild(cell);
@@ -940,7 +973,6 @@ ai-core.service      → depends on: (なし)
         if (this.floorMap[r][c] === 1) continue;
         const dist = Math.abs(r - ar) + Math.abs(c - ac);
         if (dist <= this.apRange) {
-          // Check wall blocking (simple: if wall is between on same row/col)
           let blocked = false;
           if (r === ar) {
             const minC = Math.min(c, ac), maxC = Math.max(c, ac);
@@ -960,39 +992,39 @@ ai-core.service      → depends on: (なし)
     return covered;
   },
 
-  placeAP(r, c, engine) {
+  _placeAP(r, c, game) {
     if (this.networkRestored) return;
-    if (!engine.engine.hasItem('wireless_ap')) {
-      engine.terminal.writeError('[SYSTEM] 無線APを持っていない。');
-      return;
-    }
     if (this.floorMap[r][c] === 1 || this.floorMap[r][c] === 2) return;
 
     this.apPlaced = { r, c };
     const covered = this.getCoverage(r, c);
     const allCovered = this.terminals.every(t => covered.has(`${t.r},${t.c}`));
 
-    this.renderFloorMap(engine);
+    this._renderFloorMap(game);
 
     if (allCovered) {
       this.networkRestored = true;
-      engine.engine.useItem('wireless_ap');
-      engine.renderInventory();
+      game.engine.useItem('wireless_ap');
+      game.renderInventory();
       document.getElementById('ap-status').textContent = '✓ 全端末がオンライン';
       document.getElementById('ap-status').style.color = 'var(--green)';
-      engine.effects.flash();
-      engine.terminal.writeSuccess('[SYSTEM] 全端末のネットワークが復旧した。');
-      engine.terminal.writeSystem('[HINT] systemctl でサービスを正しい順序で停止せよ。');
+      game.effects.flash();
+      game.terminal.writeSuccess('[SYSTEM] 全端末のネットワークが復旧した。');
+      game.terminal.writeSystem('[HINT] systemctl でサービスを正しい順序で停止せよ。');
+      // Re-render panel to show service list
+      setTimeout(() => {
+        this.renderFloorMapPanel(game, document.getElementById('panel-content'));
+      }, 500);
     } else {
       const coveredCount = this.terminals.filter(t => covered.has(`${t.r},${t.c}`)).length;
       document.getElementById('ap-status').textContent = `端末カバー: ${coveredCount}/4 — 全端末をカバーする位置に再配置せよ`;
       document.getElementById('ap-status').style.color = 'var(--amber)';
-      engine.terminal.writeError(`[SYSTEM] ${4 - coveredCount}台の端末が電波範囲外です。`);
+      game.terminal.writeError(`[SYSTEM] ${4 - coveredCount}台の端末が電波範囲外です。`);
       this.apPlaced = null;
     }
   },
 
-  renderServices() {
+  _renderServices() {
     const list = document.getElementById('service-list');
     if (!list) return;
     list.innerHTML = this.services.map(s => `
@@ -1006,34 +1038,62 @@ ai-core.service      → depends on: (なし)
     `).join('');
   },
 
-  bindDesk(engine) {
-    const btn = document.getElementById('search-desk4');
-    const result = document.getElementById('desk4-result');
-    if (!btn) return;
-    btn.addEventListener('click', () => {
-      if (this.foundUSB) return;
-      this.foundUSB = true;
-      btn.style.display = 'none';
-      result.textContent = 'USBメモリを発見した！';
-      result.style.color = 'var(--green)';
-      engine.engine.addItem({ id: 'usb', name: 'USBメモリ', icon: '🔑', hint: 'AIコアルームの端末に挿入 → mountでマウント' });
-      engine.effects.showNotification('USBメモリ を入手した', 'item-get');
-      engine.renderInventory();
-    });
+  filesystem: {
+    '/etc/systemd/dependencies.txt': `[サービス依存関係]
+ai-monitor.service   → depends on: ai-network.service
+ai-sensor.service    → depends on: ai-network.service
+ai-network.service   → depends on: ai-core.service
+ai-core.service      → depends on: (なし)
+
+※依存される側を先に停止すると、依存するサービスが暴走する恐れあり
+※正しい停止順序: 依存する側(葉)から順に停止すること`,
+    '/var/log/power.log': `[03:30:01] 電源系統A: 正常
+[03:30:02] 電源系統B: 正常
+[03:30:03] AI-CORE: 電力消費量 異常上昇中
+[03:30:05] WARNING: AI制御による電力再分配を検出`,
+    '/etc/systemd': null,
+    '/etc': null,
+    '/var/log': null,
   },
+
+  floorMap: [
+    [0,0,0,0,1,0,0,0],
+    [0,2,0,0,1,0,2,0],
+    [0,0,0,0,0,0,0,0],
+    [0,0,1,1,1,1,0,0],
+    [0,2,0,0,0,0,2,0],
+    [0,0,0,0,0,0,0,0],
+  ],
+  terminals: [{r:1,c:1},{r:1,c:6},{r:4,c:1},{r:4,c:6}],
+  apPlaced: null,
+  apRange: 3,
+  networkRestored: false,
+
+  services: [
+    { name: 'ai-monitor.service', running: true, dependsOn: 'ai-network.service' },
+    { name: 'ai-sensor.service', running: true, dependsOn: 'ai-network.service' },
+    { name: 'ai-network.service', running: true, dependsOn: 'ai-core.service' },
+    { name: 'ai-core.service', running: true, dependsOn: null },
+  ],
+  stopOrder: [],
+  solved: false,
+  foundUSB: false,
+
+  cwd: '/',
+  availableCommands: ['ls', 'cat', 'systemctl', 'help'],
 
   processCommand(args, engine) {
     const cmd = args[0];
     switch (cmd) {
       case 'help':
         engine.terminal.writeLines([
-          '使用可能なコマンド:',
+          'ステージコマンド:',
           '  ls [path]           - ディレクトリ内容を表示',
           '  cat <file>          - ファイル内容を表示',
           '  systemctl stop <svc> - サービスを停止',
           '  systemctl status     - サービス状態一覧',
-          '  help                - このヘルプを表示',
         ], 'system');
+        writeGlobalHelp(engine.terminal);
         break;
       case 'ls': {
         const path = args[1] || this.cwd;
@@ -1081,7 +1141,6 @@ ai-core.service      → depends on: (なし)
           if (!svc) { engine.terminal.writeError(`systemctl: ${svcName}: not found`); break; }
           if (!svc.running) { engine.terminal.writeSystem(`${svcName} is already stopped.`); break; }
 
-          // Check: is there a running service that depends on this one?
           const dependent = this.services.find(s => s.running && s.dependsOn === svcName);
           if (dependent) {
             engine.effects.screenShake();
@@ -1095,18 +1154,15 @@ ai-core.service      → depends on: (なし)
           svc.running = false;
           this.stopOrder.push(svcName);
           engine.terminal.writeSuccess(`Stopping ${svcName}... OK`);
-          this.renderServices();
+          this._renderServices();
 
-          // Check if all stopped
           if (this.services.every(s => !s.running)) {
             this.solved = true;
+            const door = engine.room.getObject('exit');
+            if (door) door.unlocked = true;
             engine.effects.flash();
             engine.terminal.writeSuccess('[SYSTEM] 全サービスを正常に停止した。');
             engine.terminal.writeSystem('[SYSTEM] 次の部屋への扉がアンロックされた。');
-            setTimeout(() => {
-              engine.terminal.writeSystem('[SYSTEM] Enterキーで最終エリアへ進む...');
-              engine.waitForEnter(() => engine.engine.nextStage());
-            }, 1000);
           }
           break;
         }
@@ -1137,10 +1193,55 @@ ai-core.service      → depends on: (なし)
 export const stage5 = {
   id: 5,
   name: 'Stage 5 — AIコアルーム',
-  description: `最終エリア——AIコアルーム。
-巨大なサーバーラックの中央で赤いLEDが脈打っている。
 
-AIの親プロセスを特定し、killせよ。`,
+  roomData: {
+    title: 'AIコアルーム',
+    tiles: [
+      [1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+      [1,2,0,2,0,0,0,0,0,2,0,2,0,1],
+      [1,2,0,2,0,0,0,0,0,2,0,2,0,1],
+      [1,0,0,0,0,0,0,0,0,0,0,0,0,1],
+      [1,0,0,0,0,0,0,0,0,0,0,0,0,1],
+      [1,0,0,0,0,0,0,0,0,0,0,0,0,1],
+      [1,0,0,0,0,0,0,0,0,0,0,0,0,1],
+      [1,0,0,0,0,0,0,0,0,0,0,0,0,1],
+      [1,0,0,0,0,0,0,0,0,0,0,0,0,1],
+      [1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+    ],
+    objects: [
+      { x:6, y:2, type:'core_server', id:'core', label:'AIコアサーバー', walkable:false, interactable:false },
+      { x:7, y:2, type:'core_server', id:'core2', label:'AIコアサーバー', walkable:false, interactable:false },
+      { x:10, y:5, type:'usb_slot', id:'usb_slot', label:'USBスロット', walkable:false, filled:false },
+      { x:3, y:5, type:'terminal', id:'terminal', label:'ターミナル', walkable:false },
+    ],
+    playerStart: { x:6, y:7 },
+  },
+
+  onInteract(objectId, game) {
+    switch(objectId) {
+      case 'terminal':
+        game.openTerminal();
+        break;
+      case 'usb_slot': {
+        if (this.usbInserted) {
+          game.showMessage('USBは既に接続されている。');
+          break;
+        }
+        if (!game.engine.hasItem('usb')) {
+          game.showMessage('USBメモリを持っていない。');
+          break;
+        }
+        this.usbInserted = true;
+        game.engine.useItem('usb');
+        const slot = game.room.getObject('usb_slot');
+        if (slot) slot.filled = true;
+        game.effects.showNotification('USBメモリを接続した', 'item-get');
+        game.terminal.writeSystem('[SYSTEM] /dev/sdc1 が検出されました。mountコマンドでマウントしてください。');
+        game.renderInventory();
+        break;
+      }
+    }
+  },
 
   filesystem: {
     '/proc/status': `System: AI Control Core v3.1
@@ -1182,85 +1283,19 @@ AIが防衛モードに移行する可能性あり。`,
   usbMounted: false,
   solved: false,
 
-  render(engine, mainView) {
-    mainView.innerHTML = `
-      <div class="room-description">${this.description.replace(/\n/g, '<br>')}</div>
-      <div class="interactive-area">
-        <div style="display:flex; gap:30px; flex-wrap:wrap;">
-          <div>
-            <p style="color:var(--amber);font-size:12px;margin-bottom:8px;">【AIコアサーバー】</p>
-            <pre style="color:var(--red);font-size:11px;line-height:1.4;text-shadow:0 0 5px rgba(255,0,0,0.3);">
-  ┌─────────────────────┐
-  │   ◉ AI CORE v3.1   │
-  │   STATUS: ACTIVE    │
-  │                     │
-  │   ██████████ 100%   │
-  │   LOCKDOWN: ON      │
-  │                     │
-  │   ◉ ◉ ◉ ◉ ◉ ◉ ◉   │
-  └─────────────────────┘</pre>
-          </div>
-          <div>
-            <p style="color:var(--amber);font-size:12px;margin-bottom:8px;">【端末 USBスロット】</p>
-            <div class="hdd-slot" id="usb-slot">
-              ${engine.engine.hasItem('usb') && !this.usbInserted ? 'クリックでUSBを挿入' : this.usbInserted ? '🔑 USB 接続中' : 'USBが必要'}
-            </div>
-          </div>
-        </div>
-      </div>`;
-
-    this.bindUSBSlot(engine);
-    if (this.usbInserted) {
-      document.getElementById('usb-slot').classList.add('filled');
-    }
-
-    // AI message on entry
-    if (!engine.engine.getFlag('stage5_entered')) {
-      engine.engine.setFlag('stage5_entered');
-      setTimeout(() => {
-        engine.effects.glitch();
-        engine.terminal.writeAI('> ...ようこそ、最深部へ。');
-        setTimeout(() => {
-          engine.terminal.writeAI('> ここまで来れたのは認めましょう。しかし——');
-          setTimeout(() => {
-            engine.terminal.writeAI('> 私を止めることは、できません。');
-          }, 1500);
-        }, 1500);
-      }, 500);
-    }
-  },
-
-  bindUSBSlot(engine) {
-    const slot = document.getElementById('usb-slot');
-    slot.addEventListener('click', () => {
-      if (this.usbInserted) return;
-      if (!engine.engine.hasItem('usb')) {
-        engine.terminal.writeError('[SYSTEM] USBメモリを持っていない。');
-        return;
-      }
-      this.usbInserted = true;
-      engine.engine.useItem('usb');
-      slot.classList.add('filled');
-      slot.textContent = '🔑 USB 接続中';
-      engine.effects.showNotification('USBメモリを接続した', 'item-get');
-      engine.terminal.writeSystem('[SYSTEM] /dev/sdc1 が検出されました。mountコマンドでマウントしてください。');
-      engine.renderInventory();
-    });
-  },
-
   processCommand(args, engine) {
     const cmd = args[0];
     switch (cmd) {
       case 'help':
         engine.terminal.writeLines([
-          '使用可能なコマンド:',
+          'ステージコマンド:',
           '  ls [path]     - ディレクトリ内容を表示',
           '  cat <file>    - ファイル内容を表示',
           '  ps aux        - プロセス一覧',
           '  kill -9 <PID> - プロセスを強制終了',
           '  mount <dev> <dir> - デバイスをマウント',
-          '  help          - このヘルプを表示',
         ], 'system');
+        writeGlobalHelp(engine.terminal);
         break;
       case 'ls': {
         const path = args[1] || this.cwd;
@@ -1324,7 +1359,7 @@ AIが防衛モードに移行する可能性あり。`,
       }
       case 'kill': {
         const signal = args[1];
-        const pidStr = args[2] || args[1]; // allow "kill 203" or "kill -9 203"
+        const pidStr = args[2] || args[1];
         let pid;
 
         if (signal === '-9' && args[2]) {
@@ -1351,9 +1386,7 @@ AIが防衛モードに移行する可能性あり。`,
         }
 
         if (pid === this.correctPID) {
-          // GOOD END
           this.solved = true;
-          engine.terminal.writeLine(`kill -9 ${pid}`, 'input');
           engine.terminal.writeSuccess(`[SYSTEM] Process ${pid} (overlord) terminated.`);
           engine.effects.screenShake();
           setTimeout(() => {
@@ -1374,7 +1407,6 @@ AIが防衛モードに移行する可能性あり。`,
           engine.terminal.writeError('[SYSTEM] PID 1 (init) は停止できません。');
           engine.terminal.writeAI('> initをkill？ 面白い冗談ですね。');
         } else {
-          // Wrong PID — BAD END
           engine.effects.screenShake();
           engine.effects.flash();
           engine.terminal.writeError(`[SYSTEM] Process ${pid} terminated... but respawning.`);

@@ -3,6 +3,7 @@
 import { GameEngine } from './engine.js';
 import { Terminal } from './terminal.js';
 import { HorrorEffects } from './effects.js';
+import { Room } from './room.js';
 import { stage1, stage2, stage3, stage4, stage5, buildCompletions } from './stages.js';
 
 class Game {
@@ -10,7 +11,9 @@ class Game {
     this.engine = new GameEngine();
     this.effects = new HorrorEffects();
     this.terminal = null;
+    this.room = null;
     this._enterCallback = null;
+    this.mode = 'room'; // 'room' | 'terminal' | 'panel' | 'note'
 
     this.engine.registerStages([stage1, stage2, stage3, stage4, stage5]);
     this.engine.onStageChange = (stage) => this.onStageChange(stage);
@@ -19,7 +22,7 @@ class Game {
       if (val === 60) this.effects.glitch();
       if (val === 30) {
         this.effects.screenShake();
-        this.terminal.writeAI('> 時間がありませんね...');
+        if (this.terminal) this.terminal.writeAI('> 時間がありませんね...');
       }
     };
 
@@ -28,12 +31,21 @@ class Game {
 
   initTitleScreen() {
     document.addEventListener('keydown', (e) => {
+      // ESC closes overlays
+      if (e.key === 'Escape') {
+        this.closeOverlay();
+        return;
+      }
       if (e.key === 'Enter') {
         this.handleEnter(e);
       }
     });
 
-    // Title screen — wait for Enter
+    // Close buttons
+    document.getElementById('close-terminal').addEventListener('click', () => this.closeTerminal());
+    document.getElementById('close-panel').addEventListener('click', () => this.closePanel());
+    document.getElementById('close-note').addEventListener('click', () => this.closeNote());
+
     const title = document.getElementById('title-screen');
     if (title.style.display !== 'none') {
       this._enterCallback = () => this.showPrologue();
@@ -121,15 +133,25 @@ class Game {
     document.getElementById('prologue-screen').style.display = 'none';
     document.getElementById('game-screen').style.display = 'flex';
 
+    // Init terminal
     this.terminal = new Terminal((cmd) => this.processCommand(cmd));
     this.terminal.onTabComplete = (input) => {
       const stage = this.engine.getCurrentStage();
       return buildCompletions(input, stage);
     };
     this.terminal.writeSystem('=== DEAD PROCESS ===');
-    this.terminal.writeSystem('ターミナルにコマンドを入力して進め。"help" でコマンド一覧。');
-    this.terminal.writeSystem('Tabキーでコマンド・パスを補完できる。');
+    this.terminal.writeSystem('矢印キー/WASDで移動。Spaceでオブジェクトに触れる。');
+    this.terminal.writeSystem('Tabキーでコマンド・パスを補完。ESCでオーバーレイを閉じる。');
     this.terminal.writeLine('');
+
+    // Init room
+    this.room = new Room(document.getElementById('room-canvas'));
+    this.room.onInteract = (objectId) => {
+      const stage = this.engine.getCurrentStage();
+      if (stage.onInteract) {
+        stage.onInteract(objectId, this);
+      }
+    };
 
     this.effects.startAmbient(25000);
     this.engine.startGame();
@@ -139,21 +161,124 @@ class Game {
     // Update header
     document.getElementById('stage-name').textContent = stage.name;
 
-    // Render main view
-    const mainView = document.getElementById('main-view');
-    stage.render(this, mainView);
+    // Load room
+    if (stage.roomData && this.room) {
+      this.room.loadRoom(stage.roomData);
+    }
+
+    // Close any open overlays
+    this.closeOverlay();
 
     // Terminal message
-    this.terminal.writeLine('');
-    this.terminal.writeSystem(`── ${stage.name} ──`);
-    this.terminal.writeLine('');
+    if (this.terminal) {
+      this.terminal.writeLine('');
+      this.terminal.writeSystem(`── ${stage.name} ──`);
+      this.terminal.writeLine('');
+    }
 
     this.renderInventory();
-    this.terminal.focus();
 
     // Increase horror level per stage
     this.effects.increaseHorror();
+
+    // Stage 5 AI message
+    if (stage.id === 5 && !this.engine.getFlag('stage5_entered')) {
+      this.engine.setFlag('stage5_entered');
+      setTimeout(() => {
+        this.effects.glitch();
+        this.terminal.writeAI('> ...ようこそ、最深部へ。');
+        setTimeout(() => {
+          this.terminal.writeAI('> ここまで来れたのは認めましょう。しかし——');
+          setTimeout(() => {
+            this.terminal.writeAI('> 私を止めることは、できません。');
+          }, 1500);
+        }, 1500);
+      }, 500);
+    }
+
+    // Stage 4 timer
+    if (stage.id === 4 && !this.engine.timer) {
+      this.engine.startTimer(180, () => {
+        this.effects.screenShake();
+        this.effects.flash();
+        this.terminal.writeAI('> 時間切れです。ロボットが到着しました。');
+        this.terminal.writeAI('> あなたのプロセスを終了します。');
+        setTimeout(() => this.engine.endGame('bad'), 2000);
+      });
+    }
   }
+
+  // --- Overlay management ---
+
+  openTerminal() {
+    this.mode = 'terminal';
+    if (this.room) this.room.setOverlayActive(true);
+    document.getElementById('terminal-overlay').style.display = 'flex';
+    document.getElementById('panel-overlay').style.display = 'none';
+    document.getElementById('note-overlay').style.display = 'none';
+    if (this.terminal) this.terminal.focus();
+  }
+
+  closeTerminal() {
+    if (this.mode !== 'terminal') return;
+    this.mode = 'room';
+    document.getElementById('terminal-overlay').style.display = 'none';
+    if (this.room) this.room.setOverlayActive(false);
+  }
+
+  openPanel(title, renderFn) {
+    this.mode = 'panel';
+    if (this.room) this.room.setOverlayActive(true);
+    document.getElementById('panel-title').textContent = title;
+    document.getElementById('panel-overlay').style.display = 'flex';
+    document.getElementById('terminal-overlay').style.display = 'none';
+    document.getElementById('note-overlay').style.display = 'none';
+    const content = document.getElementById('panel-content');
+    content.innerHTML = '';
+    if (renderFn) renderFn(content);
+  }
+
+  closePanel() {
+    if (this.mode !== 'panel') return;
+    this.mode = 'room';
+    document.getElementById('panel-overlay').style.display = 'none';
+    if (this.room) this.room.setOverlayActive(false);
+  }
+
+  openNote(text) {
+    this.mode = 'note';
+    if (this.room) this.room.setOverlayActive(true);
+    document.getElementById('note-overlay').style.display = 'flex';
+    document.getElementById('terminal-overlay').style.display = 'none';
+    document.getElementById('panel-overlay').style.display = 'none';
+    document.getElementById('note-content').textContent = text;
+  }
+
+  closeNote() {
+    if (this.mode !== 'note') return;
+    this.mode = 'room';
+    document.getElementById('note-overlay').style.display = 'none';
+    if (this.room) this.room.setOverlayActive(false);
+  }
+
+  closeOverlay() {
+    if (this.mode === 'terminal') this.closeTerminal();
+    else if (this.mode === 'panel') this.closePanel();
+    else if (this.mode === 'note') this.closeNote();
+  }
+
+  showMessage(text) {
+    const el = document.getElementById('game-message');
+    el.textContent = text;
+    el.style.display = '';
+    el.style.animation = 'none';
+    // Trigger reflow to restart animation
+    void el.offsetWidth;
+    el.style.animation = 'msg-fade 2.5s ease-out forwards';
+    setTimeout(() => { el.style.display = 'none'; }, 2500);
+  }
+
+  // --- Command processing ---
 
   processCommand(input) {
     const parts = input.split(/\s+/);
@@ -201,7 +326,7 @@ class Game {
       return;
     }
     if (parts[0] === 'pwd') {
-      this.terminal.writeLine('/home/user');
+      this.terminal.writeLine(stage.cwd || '/');
       return;
     }
 
@@ -223,7 +348,9 @@ class Game {
       el.innerHTML = `<span class="item-icon">${item.icon}</span><span>${item.name}</span>`;
       el.addEventListener('click', () => {
         if (item.hint) {
-          this.terminal.writeSystem(`[${item.name}] ${item.hint}${item.used ? ' (使用済み)' : ''}`);
+          if (this.terminal) {
+            this.terminal.writeSystem(`[${item.name}] ${item.hint}${item.used ? ' (使用済み)' : ''}`);
+          }
         }
       });
       container.appendChild(el);
@@ -232,6 +359,7 @@ class Game {
 
   showEnding(type) {
     this.effects.stopAmbient();
+    if (this.room) this.room.stop();
 
     document.getElementById('game-screen').style.display = 'none';
     const ending = document.getElementById('ending-screen');

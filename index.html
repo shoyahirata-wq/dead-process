@@ -42,16 +42,45 @@
         </span>
       </div>
 
-      <!-- メインビュー -->
-      <div id="main-view"></div>
+      <!-- RPGルーム (キャンバス) -->
+      <div id="room-container">
+        <canvas id="room-canvas"></canvas>
+      </div>
 
-      <!-- ターミナル -->
-      <div id="terminal">
-        <div id="terminal-output"></div>
-        <div id="terminal-input-line">
-          <span class="prompt">$ </span>
-          <input type="text" id="terminal-input" spellcheck="false" autocomplete="off">
+      <!-- メッセージ表示 -->
+      <div id="game-message" style="display:none"></div>
+
+      <!-- ターミナルオーバーレイ -->
+      <div id="terminal-overlay" style="display:none">
+        <div class="overlay-header">
+          <span>TERMINAL</span>
+          <button class="overlay-close" id="close-terminal">ESC</button>
         </div>
+        <div id="terminal">
+          <div id="terminal-output"></div>
+          <div id="terminal-input-line">
+            <span class="prompt">$ </span>
+            <input type="text" id="terminal-input" spellcheck="false" autocomplete="off">
+          </div>
+        </div>
+      </div>
+
+      <!-- パネルオーバーレイ (金庫、スイッチ、フロアマップなど) -->
+      <div id="panel-overlay" style="display:none">
+        <div class="overlay-header">
+          <span id="panel-title">PANEL</span>
+          <button class="overlay-close" id="close-panel">ESC</button>
+        </div>
+        <div id="panel-content"></div>
+      </div>
+
+      <!-- ノートオーバーレイ -->
+      <div id="note-overlay" style="display:none">
+        <div class="overlay-header">
+          <span id="note-title">NOTE</span>
+          <button class="overlay-close" id="close-note">ESC</button>
+        </div>
+        <div id="note-content"></div>
       </div>
 
       <!-- インベントリ -->

@@ -135,6 +135,7 @@ html, body {
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
   height: 40px;
+  z-index: 10;
 }
 
 #stage-name {
@@ -161,270 +162,99 @@ html, body {
   50% { color: #ff0000; text-shadow: 0 0 10px #ff0000; }
 }
 
-/* Main View */
-#main-view {
+/* ===== ROOM CONTAINER (RPG Canvas) ===== */
+#room-container {
   flex: 1;
-  overflow-y: auto;
-  padding: 16px;
-  background: var(--bg);
-  border-bottom: 1px solid var(--border);
-  min-height: 200px;
-}
-
-#main-view .room-description {
-  color: var(--text);
-  margin-bottom: 16px;
-  line-height: 1.6;
-}
-
-#main-view .interactive-area {
-  background: var(--bg-panel);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  padding: 16px;
-  margin-top: 12px;
-}
-
-/* ===== SWITCH / CABLE DIAGRAM ===== */
-.switch-diagram {
-  display: flex;
-  justify-content: space-around;
-  align-items: center;
-  gap: 20px;
-  padding: 20px;
-}
-
-.switch-box {
-  background: #1a1a2e;
-  border: 2px solid #333;
-  border-radius: 6px;
-  padding: 16px;
-  min-width: 160px;
-}
-
-.switch-box h3 {
-  color: var(--amber);
-  font-size: 12px;
-  margin-bottom: 12px;
-  text-align: center;
-}
-
-.port {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 10px;
-  margin: 4px 0;
-  background: #111;
-  border: 1px solid #333;
-  border-radius: 3px;
-  cursor: pointer;
-  transition: border-color 0.2s;
-  font-size: 12px;
-}
-
-.port:hover {
-  border-color: var(--green);
-}
-
-.port.connected {
-  border-color: var(--green);
-  background: var(--green-dark);
-}
-
-.port.disconnected {
-  border-color: var(--red);
-  background: #330000;
-}
-
-.port-indicator {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--green);
-}
-
-.port.disconnected .port-indicator {
-  background: var(--red);
-}
-
-/* ===== FLOOR MAP (Stage 4) ===== */
-.floor-map {
-  display: grid;
-  grid-template-columns: repeat(8, 50px);
-  grid-template-rows: repeat(6, 50px);
-  gap: 2px;
-  margin: 16px auto;
-  width: fit-content;
-}
-
-.floor-cell {
-  width: 50px;
-  height: 50px;
-  background: #111;
-  border: 1px solid #222;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 10px;
-  color: var(--text);
-  cursor: pointer;
+  background: #050505;
+  overflow: hidden;
   position: relative;
+  min-height: 0;
 }
 
-.floor-cell.wall {
-  background: #333;
-  cursor: default;
+#room-canvas {
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  display: block;
 }
 
-.floor-cell.terminal-cell {
-  color: var(--amber);
-  font-size: 18px;
-}
-
-.floor-cell.ap-placed {
+/* ===== GAME MESSAGE ===== */
+#game-message {
+  position: absolute;
+  bottom: 80px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(0, 0, 0, 0.9);
+  border: 1px solid var(--green);
   color: var(--green);
-  font-size: 20px;
-  background: var(--green-dark);
+  padding: 10px 24px;
+  font-size: 13px;
+  z-index: 50;
+  white-space: nowrap;
+  animation: msg-fade 2s ease-out forwards;
 }
 
-.floor-cell.in-range {
-  background: rgba(0, 255, 65, 0.1);
-  border-color: var(--green-dark);
+@keyframes msg-fade {
+  0%, 70% { opacity: 1; }
+  100% { opacity: 0; }
 }
 
-.floor-cell:hover:not(.wall):not(.terminal-cell) {
-  border-color: var(--green);
-}
-
-/* ===== HDD SLOT ===== */
-.hdd-slot {
-  width: 120px;
-  height: 60px;
-  border: 2px dashed #555;
-  border-radius: 6px;
+/* ===== OVERLAY COMMON ===== */
+#terminal-overlay,
+#panel-overlay,
+#note-overlay {
+  position: absolute;
+  top: 40px;
+  left: 0;
+  right: 0;
+  bottom: 50px;
+  background: rgba(0, 0, 0, 0.95);
+  z-index: 200;
   display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+}
+
+.overlay-header {
+  display: flex;
+  justify-content: space-between;
   align-items: center;
-  justify-content: center;
-  color: #555;
+  padding: 6px 12px;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--amber);
+  letter-spacing: 2px;
+}
+
+.overlay-close {
+  background: transparent;
+  border: 1px solid #444;
+  color: #888;
+  padding: 2px 8px;
+  font-family: var(--font-mono);
   font-size: 11px;
   cursor: pointer;
-  transition: all 0.3s;
-  margin: 12px 0;
+  border-radius: 2px;
 }
 
-.hdd-slot:hover {
+.overlay-close:hover {
   border-color: var(--green);
   color: var(--green);
 }
 
-.hdd-slot.filled {
-  border-color: var(--green);
-  border-style: solid;
-  background: var(--green-dark);
-  color: var(--green);
-}
-
-/* ===== KEYPAD ===== */
-.keypad {
-  display: inline-flex;
-  flex-direction: column;
-  gap: 8px;
-  align-items: center;
-  margin-top: 12px;
-}
-
-.keypad-display {
-  background: #000;
-  border: 2px solid #333;
-  padding: 8px 16px;
-  font-size: 20px;
-  color: var(--green);
-  min-width: 120px;
-  text-align: center;
-  letter-spacing: 4px;
-  font-family: var(--font-mono);
-}
-
-.keypad-buttons {
-  display: grid;
-  grid-template-columns: repeat(3, 40px);
-  gap: 4px;
-}
-
-.keypad-btn {
-  width: 40px;
-  height: 36px;
-  background: #1a1a1a;
-  border: 1px solid #444;
-  color: var(--green);
-  font-family: var(--font-mono);
-  font-size: 14px;
-  cursor: pointer;
-  border-radius: 3px;
-  transition: background 0.15s;
-}
-
-.keypad-btn:hover {
-  background: #2a2a2a;
-}
-
-.keypad-btn:active {
-  background: var(--green-dark);
-}
-
-.keypad-btn.enter {
-  grid-column: span 2;
-  width: auto;
-  background: #002200;
-}
-
-.keypad-btn.clear {
-  background: #220000;
-}
-
-/* ===== SERVICE LIST (Stage 4) ===== */
-.service-list {
-  margin-top: 16px;
-}
-
-.service-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 12px;
-  margin: 4px 0;
-  background: #111;
-  border: 1px solid #222;
-  border-radius: 3px;
-  font-size: 12px;
-}
-
-.service-status {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-}
-
-.service-status.running {
-  background: var(--green);
-  box-shadow: 0 0 6px var(--green);
-}
-
-.service-status.stopped {
-  background: #555;
-}
-
-/* ===== TERMINAL ===== */
+/* ===== TERMINAL (inside overlay) ===== */
 #terminal {
   background: #000;
-  border-top: 2px solid var(--green-dark);
   padding: 8px 12px;
-  flex-shrink: 0;
-  height: 220px;
+  flex: 1;
   display: flex;
   flex-direction: column;
   position: relative;
+  min-height: 0;
 }
 
 #terminal-output {
@@ -493,6 +323,257 @@ html, body {
   caret-color: var(--green);
 }
 
+/* ===== PANEL CONTENT ===== */
+#panel-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* ===== NOTE CONTENT ===== */
+#note-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px;
+  font-size: 14px;
+  line-height: 1.8;
+  color: var(--text);
+  white-space: pre-wrap;
+  font-family: var(--font-mono);
+}
+
+/* ===== KEYPAD ===== */
+.keypad {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: center;
+}
+
+.keypad-display {
+  background: #000;
+  border: 2px solid #333;
+  padding: 8px 16px;
+  font-size: 20px;
+  color: var(--green);
+  min-width: 120px;
+  text-align: center;
+  letter-spacing: 4px;
+  font-family: var(--font-mono);
+}
+
+.keypad-buttons {
+  display: grid;
+  grid-template-columns: repeat(3, 40px);
+  gap: 4px;
+}
+
+.keypad-btn {
+  width: 40px;
+  height: 36px;
+  background: #1a1a1a;
+  border: 1px solid #444;
+  color: var(--green);
+  font-family: var(--font-mono);
+  font-size: 14px;
+  cursor: pointer;
+  border-radius: 3px;
+  transition: background 0.15s;
+}
+
+.keypad-btn:hover {
+  background: #2a2a2a;
+}
+
+.keypad-btn:active {
+  background: var(--green-dark);
+}
+
+.keypad-btn.enter {
+  grid-column: span 2;
+  width: auto;
+  background: #002200;
+}
+
+.keypad-btn.clear {
+  background: #220000;
+}
+
+/* ===== SWITCH / CABLE DIAGRAM ===== */
+.switch-diagram {
+  display: flex;
+  justify-content: space-around;
+  align-items: center;
+  gap: 20px;
+  padding: 20px;
+}
+
+.switch-box {
+  background: #1a1a2e;
+  border: 2px solid #333;
+  border-radius: 6px;
+  padding: 16px;
+  min-width: 160px;
+}
+
+.switch-box h3 {
+  color: var(--amber);
+  font-size: 12px;
+  margin-bottom: 12px;
+  text-align: center;
+}
+
+.port {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  margin: 4px 0;
+  background: #111;
+  border: 1px solid #333;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: border-color 0.2s;
+  font-size: 12px;
+}
+
+.port:hover {
+  border-color: var(--green);
+}
+
+.port.connected {
+  border-color: var(--green);
+  background: var(--green-dark);
+}
+
+.port.disconnected {
+  border-color: var(--red);
+  background: #330000;
+}
+
+.port-indicator {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--green);
+}
+
+.port.disconnected .port-indicator {
+  background: var(--red);
+}
+
+/* ===== FLOOR MAP (Stage 4) ===== */
+.floor-map {
+  display: grid;
+  grid-template-columns: repeat(8, 44px);
+  grid-template-rows: repeat(6, 44px);
+  gap: 2px;
+  margin: 8px auto;
+  width: fit-content;
+}
+
+.floor-cell {
+  width: 44px;
+  height: 44px;
+  background: #111;
+  border: 1px solid #222;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  color: var(--text);
+  cursor: pointer;
+  position: relative;
+}
+
+.floor-cell.wall {
+  background: #333;
+  cursor: default;
+}
+
+.floor-cell.terminal-cell {
+  color: var(--amber);
+  font-size: 18px;
+}
+
+.floor-cell.ap-placed {
+  color: var(--green);
+  font-size: 20px;
+  background: var(--green-dark);
+}
+
+.floor-cell.in-range {
+  background: rgba(0, 255, 65, 0.1);
+  border-color: var(--green-dark);
+}
+
+.floor-cell:hover:not(.wall):not(.terminal-cell) {
+  border-color: var(--green);
+}
+
+/* ===== HDD SLOT ===== */
+.hdd-slot {
+  width: 120px;
+  height: 60px;
+  border: 2px dashed #555;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #555;
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.3s;
+  margin: 12px 0;
+}
+
+.hdd-slot:hover {
+  border-color: var(--green);
+  color: var(--green);
+}
+
+.hdd-slot.filled {
+  border-color: var(--green);
+  border-style: solid;
+  background: var(--green-dark);
+  color: var(--green);
+}
+
+/* ===== SERVICE LIST (Stage 4) ===== */
+.service-list {
+  margin-top: 8px;
+}
+
+.service-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  margin: 4px 0;
+  background: #111;
+  border: 1px solid #222;
+  border-radius: 3px;
+  font-size: 12px;
+}
+
+.service-status {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+.service-status.running {
+  background: var(--green);
+  box-shadow: 0 0 6px var(--green);
+}
+
+.service-status.stopped {
+  background: #555;
+}
+
 /* ===== INVENTORY ===== */
 #inventory {
   display: flex;
@@ -504,6 +585,7 @@ html, body {
   flex-shrink: 0;
   height: 50px;
   overflow-x: auto;
+  z-index: 10;
 }
 
 .inventory-label {
@@ -721,17 +803,13 @@ html, body {
   }
 
   .floor-map {
-    grid-template-columns: repeat(8, 36px);
-    grid-template-rows: repeat(6, 36px);
+    grid-template-columns: repeat(8, 32px);
+    grid-template-rows: repeat(6, 32px);
   }
 
   .floor-cell {
-    width: 36px;
-    height: 36px;
+    width: 32px;
+    height: 32px;
     font-size: 8px;
-  }
-
-  #terminal {
-    height: 180px;
   }
 }
