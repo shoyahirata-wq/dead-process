@@ -1,12 +1,12 @@
 // ===== RPG ROOM RENDERER =====
-// Canvas-based top-down room with tile map, objects, and player movement
+// Canvas-based top-down room with pixel-art sprites
 
 export class Room {
   constructor(canvasEl) {
     this.canvas = canvasEl;
     this.ctx = canvasEl.getContext('2d');
     this.data = null;
-    this.player = { x: 0, y: 0, dir: 'down' };
+    this.player = { x: 0, y: 0, dir: 'down', frame: 0 };
     this.tileSize = 0;
     this.cols = 0;
     this.rows = 0;
@@ -14,11 +14,12 @@ export class Room {
     this.moveTimer = null;
     this.moveDelay = 150;
     this.overlayActive = false;
-    this.onInteract = null; // callback(objectId)
+    this.onInteract = null;
     this.animFrame = null;
     this.roomTitle = null;
     this.roomTitleAlpha = 0;
     this.promptObj = null;
+    this.tick = 0; // animation counter
 
     this._onKey = (e) => this._handleKey(e);
     this._onKeyUp = (e) => this._handleKeyUp(e);
@@ -35,6 +36,7 @@ export class Room {
     this.player.x = data.playerStart.x;
     this.player.y = data.playerStart.y;
     this.player.dir = 'down';
+    this.player.frame = 0;
     this.keys = {};
     this.resize();
     this.showRoomTitle(data.title || '');
@@ -57,6 +59,7 @@ export class Room {
   _startLoop() {
     if (this.animFrame) cancelAnimationFrame(this.animFrame);
     const loop = () => {
+      this.tick++;
       this.update();
       this.render();
       this.animFrame = requestAnimationFrame(loop);
@@ -67,32 +70,22 @@ export class Room {
   _handleKey(e) {
     if (this.overlayActive) return;
     const key = e.key;
-
-    // Movement keys
-    if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'w', 'a', 's', 'd'].includes(key)) {
+    if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','w','a','s','d'].includes(key)) {
       e.preventDefault();
       this.keys[key] = true;
     }
-
-    // Interaction
     if (key === ' ' || key === 'Enter') {
       if (this.overlayActive) return;
       e.preventDefault();
       const obj = this.findNearbyObject();
-      if (obj && this.onInteract) {
-        this.onInteract(obj.id);
-      }
+      if (obj && this.onInteract) this.onInteract(obj.id);
     }
   }
 
-  _handleKeyUp(e) {
-    this.keys[e.key] = false;
-  }
+  _handleKeyUp(e) { this.keys[e.key] = false; }
 
   update() {
     if (this.overlayActive) return;
-
-    // Handle movement with delay
     if (this.moveTimer) return;
 
     let dx = 0, dy = 0;
@@ -108,412 +101,865 @@ export class Room {
         this.player.x = nx;
         this.player.y = ny;
       }
+      this.player.frame++;
       this.moveTimer = setTimeout(() => { this.moveTimer = null; }, this.moveDelay);
     }
 
-    // Update prompt
     this.promptObj = this.findNearbyObject();
   }
 
   render() {
     if (!this.data) return;
     const ctx = this.ctx;
-    const ts = this.tileSize;
-
     ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
 
-    // Draw tiles
-    for (let y = 0; y < this.rows; y++) {
-      for (let x = 0; x < this.cols; x++) {
+    for (let y = 0; y < this.rows; y++)
+      for (let x = 0; x < this.cols; x++)
         this.drawTile(x, y, this.data.tiles[y][x]);
-      }
-    }
 
-    // Draw objects
-    if (this.data.objects) {
-      for (const obj of this.data.objects) {
-        this.drawObject(obj);
-      }
-    }
+    if (this.data.objects)
+      for (const obj of this.data.objects) this.drawObject(obj);
 
-    // Draw player
     this.drawPlayer();
 
-    // Draw interaction prompt
-    if (this.promptObj && !this.overlayActive) {
-      this.drawPrompt(this.promptObj);
-    }
+    if (this.promptObj && !this.overlayActive) this.drawPrompt(this.promptObj);
 
-    // Draw room title
     if (this.roomTitleAlpha > 0 && this.roomTitle) {
       ctx.save();
       ctx.globalAlpha = this.roomTitleAlpha;
       ctx.fillStyle = '#000000';
       ctx.fillRect(0, this.canvas.height / 2 - 30, this.canvas.width, 60);
-      ctx.globalAlpha = this.roomTitleAlpha;
       ctx.fillStyle = '#00ff41';
-      ctx.font = `bold ${Math.max(18, ts * 0.5)}px "Courier New", monospace`;
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.shadowColor = '#00ff41';
-      ctx.shadowBlur = 15;
+      ctx.font = `bold ${Math.max(18, this.tileSize * 0.5)}px "Courier New", monospace`;
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.shadowColor = '#00ff41'; ctx.shadowBlur = 15;
       ctx.fillText(this.roomTitle, this.canvas.width / 2, this.canvas.height / 2);
       ctx.shadowBlur = 0;
       ctx.restore();
     }
   }
 
+  // --- Pixel helper: draw a filled rect at pixel grid scale ---
+  px(x, y, w, h, color) {
+    this.ctx.fillStyle = color;
+    this.ctx.fillRect(x, y, w, h);
+  }
+
+  // --- TILES ---
   drawTile(x, y, type) {
     const ctx = this.ctx;
     const ts = this.tileSize;
     const px = x * ts;
     const py = y * ts;
+    const u = Math.max(1, Math.floor(ts / 16)); // pixel unit
 
     switch (type) {
-      case 0: // Floor
-        ctx.fillStyle = (x + y) % 2 === 0 ? '#0a0e0a' : '#0d120d';
+      case 0: { // Floor — dark tile pattern
+        const dark = (x + y) % 2 === 0;
+        ctx.fillStyle = dark ? '#0c100c' : '#101410';
         ctx.fillRect(px, py, ts, ts);
-        // subtle grid lines
-        ctx.strokeStyle = '#1a2a1a';
-        ctx.lineWidth = 0.5;
-        ctx.strokeRect(px, py, ts, ts);
+        // subtle cross pattern
+        ctx.fillStyle = dark ? '#0e130e' : '#121712';
+        ctx.fillRect(px + ts/2 - u/2, py + u*2, u, ts - u*4);
+        ctx.fillRect(px + u*2, py + ts/2 - u/2, ts - u*4, u);
+        // corner dots
+        ctx.fillStyle = '#1a251a';
+        ctx.fillRect(px + u, py + u, u, u);
+        ctx.fillRect(px + ts - u*2, py + ts - u*2, u, u);
         break;
-      case 1: // Wall
-        ctx.fillStyle = '#1a1a2e';
+      }
+      case 1: { // Wall — brick pattern
+        ctx.fillStyle = '#1c1c32';
         ctx.fillRect(px, py, ts, ts);
-        ctx.strokeStyle = '#333355';
-        ctx.lineWidth = 1;
-        ctx.strokeRect(px + 1, py + 1, ts - 2, ts - 2);
-        // wall pattern
-        ctx.fillStyle = '#222244';
-        ctx.fillRect(px + 2, py + 2, ts / 2 - 2, ts / 2 - 2);
-        ctx.fillRect(px + ts / 2 + 1, py + ts / 2 + 1, ts / 2 - 3, ts / 2 - 3);
+        // brick rows
+        const bh = Math.max(2, Math.floor(ts / 4));
+        for (let row = 0; row < 4; row++) {
+          const by = py + row * bh;
+          const offset = (row % 2 === 0) ? 0 : Math.floor(ts / 2);
+          // horizontal mortar
+          ctx.fillStyle = '#2a2a4a';
+          ctx.fillRect(px, by, ts, Math.max(1, u/2));
+          // brick faces
+          ctx.fillStyle = (row % 2 === 0) ? '#222240' : '#1e1e38';
+          const bw = Math.floor(ts / 2);
+          for (let col = 0; col < 3; col++) {
+            const bx = px + col * bw - offset;
+            if (bx + bw > px && bx < px + ts) {
+              const clippedX = Math.max(px, bx);
+              const clippedW = Math.min(px + ts, bx + bw) - clippedX;
+              ctx.fillRect(clippedX + u/2, by + u/2, clippedW - u, bh - u);
+            }
+          }
+        }
+        // top/bottom border
+        ctx.fillStyle = '#333358';
+        ctx.fillRect(px, py, ts, u);
+        ctx.fillRect(px, py + ts - u, ts, u);
+        ctx.fillRect(px, py, u, ts);
+        ctx.fillRect(px + ts - u, py, u, ts);
         break;
-      case 2: // Server rack
-        ctx.fillStyle = '#0a0e0a';
+      }
+      case 2: { // Server rack
+        ctx.fillStyle = '#0c100c';
         ctx.fillRect(px, py, ts, ts);
-        ctx.fillStyle = '#111122';
-        ctx.fillRect(px + 2, py + 1, ts - 4, ts - 2);
-        // rack lights
-        const lightCount = 3;
-        for (let i = 0; i < lightCount; i++) {
-          ctx.fillStyle = Math.random() > 0.3 ? '#00ff41' : '#ff3333';
-          ctx.fillRect(px + 4, py + 4 + i * Math.floor((ts - 8) / lightCount), 3, 2);
+        // rack body
+        const rackX = px + u*2;
+        const rackY = py + u;
+        const rackW = ts - u*4;
+        const rackH = ts - u*2;
+        ctx.fillStyle = '#151520';
+        ctx.fillRect(rackX, rackY, rackW, rackH);
+        // rack border
+        ctx.fillStyle = '#2a2a40';
+        ctx.fillRect(rackX, rackY, rackW, u);
+        ctx.fillRect(rackX, rackY + rackH - u, rackW, u);
+        ctx.fillRect(rackX, rackY, u, rackH);
+        ctx.fillRect(rackX + rackW - u, rackY, u, rackH);
+        // server slots (5 rows)
+        const slotCount = 5;
+        const slotH = Math.max(2, Math.floor((rackH - u*2) / slotCount));
+        for (let i = 0; i < slotCount; i++) {
+          const sy = rackY + u + i * slotH;
+          // slot face
+          ctx.fillStyle = '#1a1a2a';
+          ctx.fillRect(rackX + u*2, sy + 1, rackW - u*4, slotH - 2);
+          // LED (use tick-based stable randomness)
+          const seed = (x * 17 + y * 31 + i * 7) % 10;
+          const ledOn = (this.tick + seed * 20) % 120 < 100;
+          ctx.fillStyle = ledOn ? '#00ff41' : '#004400';
+          ctx.fillRect(rackX + u*2, sy + Math.floor(slotH/2) - u/2, u*2, u);
+          // drive indicator
           ctx.fillStyle = '#333';
-          ctx.fillRect(px + 10, py + 4 + i * Math.floor((ts - 8) / lightCount), ts - 16, 2);
+          ctx.fillRect(rackX + u*5, sy + Math.floor(slotH/2) - u/2, rackW - u*8, u);
+        }
+        // ventilation holes on top
+        for (let i = 0; i < 3; i++) {
+          ctx.fillStyle = '#0a0a15';
+          ctx.fillRect(rackX + u*3 + i * u*3, rackY + u, u*2, u);
         }
         break;
+      }
     }
   }
 
+  // --- OBJECTS ---
   drawObject(obj) {
     const ctx = this.ctx;
     const ts = this.tileSize;
     const px = obj.x * ts;
     const py = obj.y * ts;
-    const cx = px + ts / 2;
-    const cy = py + ts / 2;
-    const fontSize = Math.max(10, ts * 0.35);
+    const u = Math.max(1, Math.floor(ts / 16));
 
-    // Draw floor underneath
-    ctx.fillStyle = (obj.x + obj.y) % 2 === 0 ? '#0a0e0a' : '#0d120d';
-    ctx.fillRect(px, py, ts, ts);
-
-    ctx.font = `${fontSize}px "Courier New", monospace`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
+    // Floor underneath
+    this.drawTile(obj.x, obj.y, 0);
 
     switch (obj.type) {
-      case 'terminal':
-        ctx.fillStyle = '#0a1a0a';
-        ctx.fillRect(px + 2, py + 2, ts - 4, ts - 4);
-        ctx.strokeStyle = '#00aa2a';
-        ctx.lineWidth = 1;
-        ctx.strokeRect(px + 2, py + 2, ts - 4, ts - 4);
-        ctx.fillStyle = '#00ff41';
-        ctx.font = `${fontSize * 0.7}px monospace`;
-        ctx.fillText('>_', cx, cy);
-        break;
-      case 'safe':
-        ctx.fillStyle = '#1a1a1a';
-        ctx.fillRect(px + 3, py + 3, ts - 6, ts - 6);
-        ctx.strokeStyle = '#666';
-        ctx.lineWidth = 2;
-        ctx.strokeRect(px + 3, py + 3, ts - 6, ts - 6);
-        ctx.fillStyle = '#ffaa00';
-        ctx.beginPath();
-        ctx.arc(cx, cy, ts * 0.12, 0, Math.PI * 2);
-        ctx.fill();
-        break;
-      case 'door':
-        ctx.fillStyle = obj.unlocked ? '#003300' : '#330000';
-        ctx.fillRect(px + 2, py, ts - 4, ts);
-        ctx.strokeStyle = obj.unlocked ? '#00ff41' : '#ff3333';
-        ctx.lineWidth = 2;
-        ctx.strokeRect(px + 2, py, ts - 4, ts);
-        ctx.fillStyle = obj.unlocked ? '#00ff41' : '#ff3333';
-        ctx.font = `${fontSize * 0.6}px monospace`;
-        ctx.fillText(obj.unlocked ? 'OPEN' : 'LOCK', cx, cy);
-        break;
-      case 'note':
-        ctx.fillStyle = '#2a2a0a';
-        ctx.fillRect(px + ts * 0.2, py + ts * 0.15, ts * 0.6, ts * 0.7);
-        ctx.strokeStyle = '#aaaa44';
-        ctx.lineWidth = 1;
-        ctx.strokeRect(px + ts * 0.2, py + ts * 0.15, ts * 0.6, ts * 0.7);
-        // text lines
-        for (let i = 0; i < 3; i++) {
-          ctx.fillStyle = '#666633';
-          ctx.fillRect(px + ts * 0.28, py + ts * 0.25 + i * ts * 0.15, ts * 0.44, 1);
-        }
-        break;
-      case 'rack_search':
-        // server rack with "?" indicator
-        ctx.fillStyle = '#111122';
-        ctx.fillRect(px + 2, py + 1, ts - 4, ts - 2);
-        ctx.fillStyle = '#ffaa00';
-        ctx.font = `bold ${fontSize}px monospace`;
-        ctx.fillText('?', cx, cy);
-        break;
-      case 'desk':
-        ctx.fillStyle = '#1a1510';
-        ctx.fillRect(px + 2, py + ts * 0.3, ts - 4, ts * 0.5);
-        ctx.strokeStyle = '#4a3a20';
-        ctx.lineWidth = 1;
-        ctx.strokeRect(px + 2, py + ts * 0.3, ts - 4, ts * 0.5);
-        ctx.fillStyle = '#555';
-        ctx.font = `${fontSize * 0.6}px monospace`;
-        ctx.fillText('DESK', cx, cy);
-        break;
-      case 'switch_panel':
-        ctx.fillStyle = '#0a0a1a';
-        ctx.fillRect(px + 2, py + 2, ts - 4, ts - 4);
-        ctx.strokeStyle = '#4444aa';
-        ctx.lineWidth = 2;
-        ctx.strokeRect(px + 2, py + 2, ts - 4, ts - 4);
-        // port lights
-        for (let i = 0; i < 4; i++) {
-          ctx.fillStyle = '#00ff41';
-          ctx.fillRect(px + 6 + i * Math.floor((ts - 12) / 4), py + ts * 0.6, 4, 3);
-        }
-        ctx.fillStyle = '#6666ff';
-        ctx.font = `${fontSize * 0.5}px monospace`;
-        ctx.fillText('SW', cx, cy - ts * 0.1);
-        break;
-      case 'hdd_slot':
-        ctx.fillStyle = '#111';
-        ctx.fillRect(px + 4, py + ts * 0.25, ts - 8, ts * 0.5);
-        ctx.strokeStyle = obj.filled ? '#00ff41' : '#555';
-        ctx.lineWidth = 1;
-        ctx.strokeRect(px + 4, py + ts * 0.25, ts - 8, ts * 0.5);
-        ctx.fillStyle = obj.filled ? '#00ff41' : '#555';
-        ctx.font = `${fontSize * 0.5}px monospace`;
-        ctx.fillText(obj.filled ? 'HDD' : 'SLOT', cx, cy);
-        break;
-      case 'usb_slot':
-        ctx.fillStyle = '#111';
-        ctx.fillRect(px + 4, py + ts * 0.25, ts - 8, ts * 0.5);
-        ctx.strokeStyle = obj.filled ? '#00ff41' : '#555';
-        ctx.lineWidth = 1;
-        ctx.strokeRect(px + 4, py + ts * 0.25, ts - 8, ts * 0.5);
-        ctx.fillStyle = obj.filled ? '#00ff41' : '#555';
-        ctx.font = `${fontSize * 0.5}px monospace`;
-        ctx.fillText(obj.filled ? 'USB' : 'SLOT', cx, cy);
-        break;
-      case 'shelf':
-        ctx.fillStyle = '#1a150a';
-        ctx.fillRect(px + 1, py + 2, ts - 2, ts - 4);
-        for (let i = 0; i < 3; i++) {
-          ctx.fillStyle = '#3a2a10';
-          ctx.fillRect(px + 1, py + 4 + i * Math.floor((ts - 8) / 3), ts - 2, 2);
-        }
-        ctx.fillStyle = '#888';
-        ctx.font = `${fontSize * 0.5}px monospace`;
-        ctx.fillText('SHELF', cx, cy);
-        break;
-      case 'core_server':
-        // Pulsing red AI core
-        ctx.fillStyle = '#1a0000';
-        ctx.fillRect(px + 1, py + 1, ts - 2, ts - 2);
-        ctx.strokeStyle = '#ff3333';
-        ctx.lineWidth = 2;
-        ctx.strokeRect(px + 1, py + 1, ts - 2, ts - 2);
-        const pulse = 0.5 + 0.5 * Math.sin(Date.now() / 300);
-        ctx.fillStyle = `rgba(255, 0, 0, ${0.3 + pulse * 0.4})`;
-        ctx.beginPath();
-        ctx.arc(cx, cy, ts * 0.2, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.fillStyle = '#ff3333';
-        ctx.font = `${fontSize * 0.5}px monospace`;
-        ctx.fillText('AI', cx, cy);
-        break;
-      case 'floor_map':
-        ctx.fillStyle = '#0a0a1a';
-        ctx.fillRect(px + 2, py + 2, ts - 4, ts - 4);
-        ctx.strokeStyle = '#4444aa';
-        ctx.lineWidth = 1;
-        ctx.strokeRect(px + 2, py + 2, ts - 4, ts - 4);
-        // grid pattern
-        for (let i = 1; i < 4; i++) {
-          ctx.strokeStyle = '#222244';
-          ctx.beginPath();
-          ctx.moveTo(px + 2 + i * (ts - 4) / 4, py + 2);
-          ctx.lineTo(px + 2 + i * (ts - 4) / 4, py + ts - 2);
-          ctx.stroke();
-          ctx.beginPath();
-          ctx.moveTo(px + 2, py + 2 + i * (ts - 4) / 4);
-          ctx.lineTo(px + ts - 2, py + 2 + i * (ts - 4) / 4);
-          ctx.stroke();
-        }
-        ctx.fillStyle = '#6666ff';
-        ctx.font = `${fontSize * 0.45}px monospace`;
-        ctx.fillText('MAP', cx, cy);
-        break;
-      case 'camera':
-        ctx.fillStyle = (obj.x + obj.y) % 2 === 0 ? '#0a0e0a' : '#0d120d';
-        ctx.fillRect(px, py, ts, ts);
-        ctx.fillStyle = obj.disabled ? '#333' : '#ff3333';
-        ctx.font = `${fontSize * 0.8}px monospace`;
-        ctx.fillText(obj.disabled ? '📹' : '📹', cx, cy);
-        if (!obj.disabled) {
-          ctx.fillStyle = `rgba(255, 0, 0, ${0.2 + 0.1 * Math.sin(Date.now() / 500)})`;
-          ctx.beginPath();
-          ctx.arc(cx, cy, ts * 0.35, 0, Math.PI * 2);
-          ctx.fill();
-        }
-        break;
-      case 'door_perm':
-        ctx.fillStyle = obj.unlocked ? '#003300' : '#1a0000';
-        ctx.fillRect(px + 2, py, ts - 4, ts);
-        ctx.strokeStyle = obj.unlocked ? '#00ff41' : '#ff3333';
-        ctx.lineWidth = 2;
-        ctx.strokeRect(px + 2, py, ts - 4, ts);
-        ctx.fillStyle = obj.unlocked ? '#00ff41' : '#ff3333';
-        ctx.font = `${fontSize * 0.45}px monospace`;
-        ctx.fillText(obj.unlocked ? 'OPEN' : obj.perms || '000', cx, cy);
-        break;
+      case 'terminal': this._drawTerminal(px, py, ts, u); break;
+      case 'safe': this._drawSafe(px, py, ts, u); break;
+      case 'door': this._drawDoor(px, py, ts, u, obj); break;
+      case 'door_perm': this._drawDoorPerm(px, py, ts, u, obj); break;
+      case 'note': this._drawNote(px, py, ts, u); break;
+      case 'rack_search': this._drawRackSearch(px, py, ts, u); break;
+      case 'desk': this._drawDesk(px, py, ts, u); break;
+      case 'switch_panel': this._drawSwitch(px, py, ts, u); break;
+      case 'hdd_slot': this._drawSlot(px, py, ts, u, obj, 'HDD'); break;
+      case 'usb_slot': this._drawSlot(px, py, ts, u, obj, 'USB'); break;
+      case 'shelf': this._drawShelf(px, py, ts, u); break;
+      case 'core_server': this._drawCoreServer(px, py, ts, u); break;
+      case 'floor_map': this._drawFloorMap(px, py, ts, u); break;
+      case 'camera': this._drawCamera(px, py, ts, u, obj); break;
       default:
         ctx.fillStyle = '#555';
-        ctx.font = `${fontSize * 0.6}px monospace`;
-        ctx.fillText('?', cx, cy);
+        ctx.font = `${ts*0.3}px monospace`;
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText('?', px+ts/2, py+ts/2);
     }
   }
 
+  _drawTerminal(px, py, ts, u) {
+    const ctx = this.ctx;
+    // Desk surface
+    ctx.fillStyle = '#2a2520';
+    ctx.fillRect(px + u*2, py + ts - u*5, ts - u*4, u*4);
+    // Monitor frame
+    const mx = px + u*3, my = py + u*2, mw = ts - u*6, mh = ts - u*8;
+    ctx.fillStyle = '#222';
+    ctx.fillRect(mx - u, my - u, mw + u*2, mh + u*2);
+    // Screen
+    ctx.fillStyle = '#001a00';
+    ctx.fillRect(mx, my, mw, mh);
+    // Screen glow
+    ctx.fillStyle = '#002a00';
+    ctx.fillRect(mx + u, my + u, mw - u*2, mh - u*2);
+    // Terminal text lines on screen
+    const lineH = Math.max(2, Math.floor(mh / 6));
+    for (let i = 0; i < 4; i++) {
+      const lw = mw * (0.4 + ((i * 37) % 5) * 0.1);
+      ctx.fillStyle = '#00ff41';
+      ctx.fillRect(mx + u*2, my + u*2 + i * lineH, Math.min(lw, mw - u*4), Math.max(1, u));
+    }
+    // Blinking cursor
+    if (this.tick % 60 < 30) {
+      ctx.fillStyle = '#00ff41';
+      ctx.fillRect(mx + u*2, my + u*2 + 4 * lineH, u*2, Math.max(1, u));
+    }
+    // Monitor stand
+    ctx.fillStyle = '#333';
+    ctx.fillRect(px + ts/2 - u*2, py + ts - u*6, u*4, u*2);
+    // Keyboard
+    ctx.fillStyle = '#1a1a1a';
+    ctx.fillRect(px + u*4, py + ts - u*3, ts - u*8, u*2);
+    // Key dots on keyboard
+    for (let i = 0; i < 4; i++) {
+      ctx.fillStyle = '#333';
+      ctx.fillRect(px + u*5 + i * u*2, py + ts - u*2.5, u, u*0.5);
+    }
+  }
+
+  _drawSafe(px, py, ts, u) {
+    const ctx = this.ctx;
+    // Safe body
+    const sx = px + u*2, sy = py + u*2, sw = ts - u*4, sh = ts - u*4;
+    ctx.fillStyle = '#2a2a2a';
+    ctx.fillRect(sx, sy, sw, sh);
+    // Metal edges
+    ctx.fillStyle = '#404040';
+    ctx.fillRect(sx, sy, sw, u);
+    ctx.fillRect(sx, sy + sh - u, sw, u);
+    ctx.fillRect(sx, sy, u, sh);
+    ctx.fillRect(sx + sw - u, sy, u, sh);
+    // Inner panel
+    ctx.fillStyle = '#222';
+    ctx.fillRect(sx + u*2, sy + u*2, sw - u*4, sh - u*4);
+    // Dial
+    const dcx = px + ts/2, dcy = py + ts/2;
+    const dr = Math.max(3, ts * 0.12);
+    ctx.fillStyle = '#ffaa00';
+    ctx.beginPath(); ctx.arc(dcx, dcy, dr, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#cc8800';
+    ctx.beginPath(); ctx.arc(dcx, dcy, dr * 0.5, 0, Math.PI*2); ctx.fill();
+    // Dial tick marks
+    for (let a = 0; a < 8; a++) {
+      const angle = a * Math.PI / 4;
+      ctx.fillStyle = '#ffcc44';
+      ctx.fillRect(
+        dcx + Math.cos(angle) * dr * 0.7 - u/2,
+        dcy + Math.sin(angle) * dr * 0.7 - u/2, u, u
+      );
+    }
+    // Handle
+    ctx.fillStyle = '#666';
+    ctx.fillRect(sx + sw - u*4, dcy - u*2, u*2, u*4);
+    // Keyhole
+    ctx.fillStyle = '#111';
+    ctx.fillRect(dcx - u/2, dcy + dr + u*2, u, u*2);
+  }
+
+  _drawDoor(px, py, ts, u, obj) {
+    const ctx = this.ctx;
+    const open = obj.unlocked;
+    // Door frame
+    ctx.fillStyle = '#333';
+    ctx.fillRect(px + u, py, ts - u*2, ts);
+    // Door body
+    ctx.fillStyle = open ? '#1a3a1a' : '#3a1a1a';
+    ctx.fillRect(px + u*2, py + u, ts - u*4, ts - u*2);
+    // Panel details (2 panels)
+    const panelW = ts - u*6;
+    const panelH = (ts - u*6) / 2;
+    for (let i = 0; i < 2; i++) {
+      ctx.fillStyle = open ? '#224422' : '#441818';
+      ctx.fillRect(px + u*3, py + u*2 + i * (panelH + u), panelW, panelH);
+      ctx.strokeStyle = open ? '#336633' : '#552222';
+      ctx.lineWidth = u * 0.5;
+      ctx.strokeRect(px + u*3, py + u*2 + i * (panelH + u), panelW, panelH);
+    }
+    // Door handle
+    const hy = py + ts/2;
+    ctx.fillStyle = open ? '#00ff41' : '#ff3333';
+    ctx.fillRect(px + ts - u*5, hy - u, u*2, u*3);
+    // Lock indicator light
+    ctx.fillStyle = open ? '#00ff41' : '#ff3333';
+    ctx.shadowColor = open ? '#00ff41' : '#ff3333';
+    ctx.shadowBlur = 6;
+    ctx.fillRect(px + ts/2 - u, py + u*2, u*2, u*2);
+    ctx.shadowBlur = 0;
+  }
+
+  _drawDoorPerm(px, py, ts, u, obj) {
+    const ctx = this.ctx;
+    const open = obj.unlocked;
+    // Same as door but with permission display
+    this._drawDoor(px, py, ts, u, obj);
+    // Permission overlay
+    if (!open) {
+      ctx.fillStyle = 'rgba(0,0,0,0.6)';
+      ctx.fillRect(px + u*3, py + ts - u*5, ts - u*6, u*3);
+      ctx.fillStyle = '#ff6666';
+      ctx.font = `${Math.max(8, ts*0.18)}px monospace`;
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(obj.perms || '000', px + ts/2, py + ts - u*3.5);
+    }
+  }
+
+  _drawNote(px, py, ts, u) {
+    const ctx = this.ctx;
+    // Paper
+    const nx = px + u*3, ny = py + u*2, nw = ts - u*6, nh = ts - u*4;
+    // Shadow
+    ctx.fillStyle = '#111';
+    ctx.fillRect(nx + u, ny + u, nw, nh);
+    // Paper body
+    ctx.fillStyle = '#d4c896';
+    ctx.fillRect(nx, ny, nw, nh);
+    // Folded corner
+    ctx.fillStyle = '#b8aa78';
+    ctx.beginPath();
+    ctx.moveTo(nx + nw - u*3, ny);
+    ctx.lineTo(nx + nw, ny + u*3);
+    ctx.lineTo(nx + nw, ny);
+    ctx.closePath();
+    ctx.fill();
+    // Text lines
+    const lineCount = 5;
+    const lineH = Math.max(2, Math.floor((nh - u*4) / lineCount));
+    for (let i = 0; i < lineCount; i++) {
+      const lw = nw * (0.5 + ((i * 23) % 4) * 0.12);
+      ctx.fillStyle = '#5a5030';
+      ctx.fillRect(nx + u*2, ny + u*2 + i * lineH, Math.min(lw, nw - u*4), Math.max(1, u * 0.7));
+    }
+    // Pin/tack at top
+    ctx.fillStyle = '#ff4444';
+    ctx.beginPath();
+    ctx.arc(nx + nw/2, ny - u, u*1.2, 0, Math.PI*2);
+    ctx.fill();
+  }
+
+  _drawRackSearch(px, py, ts, u) {
+    const ctx = this.ctx;
+    // Server rack body (reuse rack tile look)
+    ctx.fillStyle = '#151520';
+    ctx.fillRect(px + u*2, py + u, ts - u*4, ts - u*2);
+    // Border
+    ctx.fillStyle = '#2a2a40';
+    ctx.fillRect(px + u*2, py + u, ts - u*4, u);
+    ctx.fillRect(px + u*2, py + ts - u*2, ts - u*4, u);
+    // Slots
+    const slotH = Math.max(3, Math.floor((ts - u*4) / 4));
+    for (let i = 0; i < 4; i++) {
+      ctx.fillStyle = '#1a1a2a';
+      ctx.fillRect(px + u*4, py + u*2 + i * slotH, ts - u*8, slotH - 2);
+    }
+    // Glowing "?" indicator
+    const qx = px + ts/2, qy = py + ts/2;
+    ctx.fillStyle = 'rgba(255, 170, 0, 0.15)';
+    ctx.beginPath(); ctx.arc(qx, qy, ts*0.3, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#ffaa00';
+    ctx.shadowColor = '#ffaa00'; ctx.shadowBlur = 8;
+    ctx.font = `bold ${Math.max(12, ts*0.4)}px monospace`;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('?', qx, qy);
+    ctx.shadowBlur = 0;
+  }
+
+  _drawDesk(px, py, ts, u) {
+    const ctx = this.ctx;
+    // Desk legs
+    ctx.fillStyle = '#3a2a15';
+    ctx.fillRect(px + u*2, py + ts*0.55, u*2, ts*0.4);
+    ctx.fillRect(px + ts - u*4, py + ts*0.55, u*2, ts*0.4);
+    // Desk top surface
+    ctx.fillStyle = '#4a3820';
+    ctx.fillRect(px + u, py + ts*0.35, ts - u*2, u*4);
+    // Surface highlight
+    ctx.fillStyle = '#5a4830';
+    ctx.fillRect(px + u*2, py + ts*0.35, ts - u*4, u);
+    // Drawer
+    ctx.fillStyle = '#3a2a18';
+    ctx.fillRect(px + u*3, py + ts*0.35 + u*4, ts*0.4, u*3);
+    // Drawer handle
+    ctx.fillStyle = '#888';
+    ctx.fillRect(px + u*3 + ts*0.15, py + ts*0.35 + u*5, ts*0.1, u);
+    // Items on desk (pencil holder)
+    ctx.fillStyle = '#555';
+    ctx.fillRect(px + ts - u*6, py + ts*0.28, u*3, u*3);
+    ctx.fillStyle = '#ffaa00';
+    ctx.fillRect(px + ts - u*5.5, py + ts*0.2, u, u*3);
+    ctx.fillStyle = '#00aaff';
+    ctx.fillRect(px + ts - u*4.5, py + ts*0.22, u, u*3);
+  }
+
+  _drawSwitch(px, py, ts, u) {
+    const ctx = this.ctx;
+    // Switch body (1U rack unit)
+    const sx = px + u*2, sy = py + u*3, sw = ts - u*4, sh = ts - u*6;
+    ctx.fillStyle = '#1a1a30';
+    ctx.fillRect(sx, sy, sw, sh);
+    // Metal border
+    ctx.fillStyle = '#3333558';
+    ctx.fillRect(sx, sy, sw, u); ctx.fillRect(sx, sy+sh-u, sw, u);
+    ctx.fillRect(sx, sy, u, sh); ctx.fillRect(sx+sw-u, sy, u, sh);
+    // Brand label area
+    ctx.fillStyle = '#222244';
+    ctx.fillRect(sx + u*2, sy + u, sw - u*4, u*2);
+    ctx.fillStyle = '#4444aa';
+    ctx.font = `${Math.max(6, ts*0.12)}px monospace`;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('SWITCH', px + ts/2, sy + u*2);
+    // Ports (8 ports in 2 rows)
+    const portW = Math.max(2, Math.floor((sw - u*6) / 4));
+    const portH = Math.max(2, u*2);
+    for (let row = 0; row < 2; row++) {
+      for (let col = 0; col < 4; col++) {
+        const portX = sx + u*2 + col * (portW + u);
+        const portY = sy + u*4 + row * (portH + u);
+        // Port body
+        ctx.fillStyle = '#0a0a15';
+        ctx.fillRect(portX, portY, portW, portH);
+        // Port border
+        ctx.strokeStyle = '#444';
+        ctx.lineWidth = 0.5;
+        ctx.strokeRect(portX, portY, portW, portH);
+      }
+    }
+    // Status LEDs below ports
+    const ledY = sy + sh - u*3;
+    for (let i = 0; i < 4; i++) {
+      const active = (this.tick + i * 30) % 90 < 80;
+      ctx.fillStyle = active ? '#00ff41' : '#003300';
+      ctx.shadowColor = active ? '#00ff41' : 'transparent';
+      ctx.shadowBlur = active ? 4 : 0;
+      ctx.fillRect(sx + u*3 + i * (portW + u), ledY, u*1.5, u*1.5);
+    }
+    ctx.shadowBlur = 0;
+    // Cable going in from top
+    ctx.fillStyle = '#0066aa';
+    ctx.fillRect(px + ts/2 - u/2, py, u, u*3);
+  }
+
+  _drawSlot(px, py, ts, u, obj, label) {
+    const ctx = this.ctx;
+    // Machine body
+    ctx.fillStyle = '#1a1a1a';
+    ctx.fillRect(px + u*2, py + u*2, ts - u*4, ts - u*4);
+    ctx.fillStyle = '#2a2a2a';
+    ctx.fillRect(px + u*2, py + u*2, ts - u*4, u);
+    // Screen/display area
+    ctx.fillStyle = '#001100';
+    ctx.fillRect(px + u*3, py + u*4, ts - u*6, u*4);
+    // Display text
+    ctx.fillStyle = obj.filled ? '#00ff41' : '#444';
+    ctx.font = `${Math.max(7, ts*0.15)}px monospace`;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(obj.filled ? `${label} OK` : 'EMPTY', px + ts/2, py + u*6);
+    // Slot opening
+    const slotY = py + ts/2 + u;
+    ctx.fillStyle = obj.filled ? '#003300' : '#111';
+    ctx.fillRect(px + u*4, slotY, ts - u*8, u*3);
+    ctx.strokeStyle = obj.filled ? '#00ff41' : '#444';
+    ctx.lineWidth = u * 0.5;
+    ctx.strokeRect(px + u*4, slotY, ts - u*8, u*3);
+    // Device in slot
+    if (obj.filled) {
+      ctx.fillStyle = '#00aa33';
+      ctx.fillRect(px + u*4 + u, slotY + u*0.5, ts - u*10, u*2);
+      // LED
+      ctx.fillStyle = '#00ff41';
+      ctx.shadowColor = '#00ff41'; ctx.shadowBlur = 4;
+      ctx.fillRect(px + ts - u*6, slotY + u, u, u);
+      ctx.shadowBlur = 0;
+    }
+    // Eject button
+    ctx.fillStyle = '#444';
+    ctx.fillRect(px + ts - u*4, py + ts - u*4, u*2, u*2);
+  }
+
+  _drawShelf(px, py, ts, u) {
+    const ctx = this.ctx;
+    // Shelf frame
+    ctx.fillStyle = '#2a1f10';
+    ctx.fillRect(px + u, py + u, ts - u*2, ts - u*2);
+    // Shelves (3 levels)
+    const shelfCount = 3;
+    const shelfH = Math.floor((ts - u*4) / shelfCount);
+    for (let i = 0; i < shelfCount; i++) {
+      const sy = py + u*2 + i * shelfH;
+      // Shelf board
+      ctx.fillStyle = '#3a2a15';
+      ctx.fillRect(px + u, sy + shelfH - u*1.5, ts - u*2, u*1.5);
+      // Items on shelf
+      if (i === 0) {
+        // Tapes/media
+        for (let j = 0; j < 3; j++) {
+          ctx.fillStyle = ['#2255aa', '#aa3322', '#33aa33'][j];
+          ctx.fillRect(px + u*3 + j * u*3, sy + u, u*2, shelfH - u*3);
+        }
+      } else if (i === 1) {
+        // Boxes
+        ctx.fillStyle = '#4a4a30';
+        ctx.fillRect(px + u*2, sy + u*2, u*5, shelfH - u*4);
+        ctx.fillStyle = '#555540';
+        ctx.fillRect(px + u*8, sy + u, u*4, shelfH - u*3);
+      } else {
+        // Small items
+        ctx.fillStyle = '#666';
+        ctx.fillRect(px + u*3, sy + u*2, u*2, u*2);
+        ctx.fillStyle = '#886622';
+        ctx.fillRect(px + u*7, sy + u, u*3, shelfH - u*3);
+      }
+    }
+    // Side borders
+    ctx.fillStyle = '#3a2a15';
+    ctx.fillRect(px + u, py + u, u, ts - u*2);
+    ctx.fillRect(px + ts - u*2, py + u, u, ts - u*2);
+  }
+
+  _drawCoreServer(px, py, ts, u) {
+    const ctx = this.ctx;
+    const pulse = 0.5 + 0.5 * Math.sin(this.tick * 0.05);
+    // Outer glow
+    ctx.fillStyle = `rgba(255, 0, 0, ${0.05 + pulse * 0.08})`;
+    ctx.fillRect(px, py, ts, ts);
+    // Server body
+    ctx.fillStyle = '#1a0505';
+    ctx.fillRect(px + u, py + u, ts - u*2, ts - u*2);
+    // Red border with pulse
+    ctx.strokeStyle = `rgba(255, 50, 50, ${0.5 + pulse * 0.5})`;
+    ctx.lineWidth = u;
+    ctx.strokeRect(px + u, py + u, ts - u*2, ts - u*2);
+    // Inner core light
+    const coreR = Math.max(4, ts * 0.15);
+    const cx = px + ts/2, cy = py + ts/2;
+    // Glow rings
+    for (let r = 3; r >= 0; r--) {
+      ctx.fillStyle = `rgba(255, 0, 0, ${(0.05 + pulse * 0.05) * (4 - r)})`;
+      ctx.beginPath(); ctx.arc(cx, cy, coreR + r * u*2, 0, Math.PI*2); ctx.fill();
+    }
+    // Core
+    ctx.fillStyle = `rgb(${180 + pulse * 75}, 0, 0)`;
+    ctx.beginPath(); ctx.arc(cx, cy, coreR, 0, Math.PI*2); ctx.fill();
+    // Cross lines
+    ctx.strokeStyle = '#ff2222';
+    ctx.lineWidth = u * 0.5;
+    ctx.beginPath(); ctx.moveTo(cx - coreR*0.7, cy); ctx.lineTo(cx + coreR*0.7, cy); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(cx, cy - coreR*0.7); ctx.lineTo(cx, cy + coreR*0.7); ctx.stroke();
+    // LED array at top
+    for (let i = 0; i < 5; i++) {
+      const on = (this.tick + i * 15) % 50 < 35;
+      ctx.fillStyle = on ? '#ff3333' : '#330000';
+      ctx.fillRect(px + u*3 + i * u*2, py + u*2, u*1.5, u*1.5);
+    }
+    // "AI" text
+    ctx.fillStyle = '#ff4444';
+    ctx.shadowColor = '#ff0000'; ctx.shadowBlur = 6;
+    ctx.font = `bold ${Math.max(8, ts*0.18)}px monospace`;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('AI', cx, py + ts - u*3);
+    ctx.shadowBlur = 0;
+  }
+
+  _drawFloorMap(px, py, ts, u) {
+    const ctx = this.ctx;
+    // Wall-mounted display
+    ctx.fillStyle = '#1a1a2e';
+    ctx.fillRect(px + u*2, py + u*2, ts - u*4, ts - u*4);
+    // Screen
+    const sx = px + u*3, sy = py + u*3, sw = ts - u*6, sh = ts - u*6;
+    ctx.fillStyle = '#000820';
+    ctx.fillRect(sx, sy, sw, sh);
+    // Grid on screen
+    ctx.strokeStyle = '#112244';
+    ctx.lineWidth = 0.5;
+    for (let i = 1; i < 4; i++) {
+      ctx.beginPath();
+      ctx.moveTo(sx + i * sw/4, sy); ctx.lineTo(sx + i * sw/4, sy + sh);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(sx, sy + i * sh/4); ctx.lineTo(sx + sw, sy + i * sh/4);
+      ctx.stroke();
+    }
+    // Blinking dots on map (terminals)
+    const dotR = Math.max(1, u);
+    const dots = [[0.2,0.2],[0.8,0.2],[0.2,0.8],[0.8,0.8]];
+    dots.forEach((d, i) => {
+      const on = (this.tick + i * 20) % 60 < 40;
+      ctx.fillStyle = on ? '#00aaff' : '#003355';
+      ctx.fillRect(sx + sw*d[0] - dotR, sy + sh*d[1] - dotR, dotR*2, dotR*2);
+    });
+    // Border/frame
+    ctx.strokeStyle = '#4444aa';
+    ctx.lineWidth = u;
+    ctx.strokeRect(px + u*2, py + u*2, ts - u*4, ts - u*4);
+    // Mount
+    ctx.fillStyle = '#333';
+    ctx.fillRect(px + ts/2 - u, py + u, u*2, u*2);
+  }
+
+  _drawCamera(px, py, ts, u, obj) {
+    const ctx = this.ctx;
+    const off = obj.disabled;
+    // Ceiling mount
+    ctx.fillStyle = '#333';
+    ctx.fillRect(px + ts/2 - u*2, py + u, u*4, u*2);
+    // Arm
+    ctx.fillStyle = '#444';
+    ctx.fillRect(px + ts/2 - u, py + u*2, u*2, u*3);
+    // Camera body
+    const bx = px + ts/2 - u*4, by = py + u*4, bw = u*8, bh = u*5;
+    ctx.fillStyle = off ? '#2a2a2a' : '#333';
+    ctx.fillRect(bx, by, bw, bh);
+    // Lens
+    const lx = px + ts/2, ly = by + bh/2;
+    ctx.fillStyle = off ? '#222' : '#111';
+    ctx.beginPath(); ctx.arc(lx, ly, u*2, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = off ? '#333' : '#0066cc';
+    ctx.beginPath(); ctx.arc(lx, ly, u*1.2, 0, Math.PI*2); ctx.fill();
+    // Recording LED
+    if (!off) {
+      const blink = this.tick % 40 < 25;
+      ctx.fillStyle = blink ? '#ff0000' : '#440000';
+      ctx.shadowColor = blink ? '#ff0000' : 'transparent';
+      ctx.shadowBlur = blink ? 6 : 0;
+      ctx.fillRect(bx + bw - u*2, by + u, u*1.5, u*1.5);
+      ctx.shadowBlur = 0;
+      // Scan cone
+      ctx.fillStyle = `rgba(255, 0, 0, ${0.03 + 0.02 * Math.sin(this.tick * 0.03)})`;
+      ctx.beginPath();
+      ctx.moveTo(lx, ly);
+      ctx.lineTo(px + u*2, py + ts - u);
+      ctx.lineTo(px + ts - u*2, py + ts - u);
+      ctx.closePath();
+      ctx.fill();
+    }
+  }
+
+  // --- PLAYER (detailed pixel art, 4 directions) ---
   drawPlayer() {
     const ctx = this.ctx;
     const ts = this.tileSize;
     const px = this.player.x * ts;
     const py = this.player.y * ts;
+    const u = Math.max(1, Math.floor(ts / 16));
     const cx = px + ts / 2;
-    const cy = py + ts / 2;
-    const s = ts * 0.35;
+    const dir = this.player.dir;
+    const walkCycle = this.player.frame % 4; // 0,1,2,3
 
-    // Body
-    ctx.fillStyle = '#00ddff';
-    ctx.fillRect(cx - s * 0.4, cy - s * 0.6, s * 0.8, s * 1.2);
-
-    // Head
-    ctx.fillStyle = '#00ddff';
+    // Shadow
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
     ctx.beginPath();
-    ctx.arc(cx, cy - s * 0.7, s * 0.35, 0, Math.PI * 2);
+    ctx.ellipse(cx, py + ts - u*2, u*4, u*1.5, 0, 0, Math.PI*2);
     ctx.fill();
 
-    // Direction indicator (small triangle)
-    ctx.fillStyle = '#ffffff';
-    ctx.beginPath();
-    const arrowSize = s * 0.25;
-    switch (this.player.dir) {
-      case 'up':
-        ctx.moveTo(cx, cy - s - arrowSize);
-        ctx.lineTo(cx - arrowSize, cy - s);
-        ctx.lineTo(cx + arrowSize, cy - s);
+    // Body measurements
+    const headY = py + u*2;
+    const headH = u*4;
+    const bodyY = headY + headH;
+    const bodyH = u*5;
+    const legY = bodyY + bodyH;
+    const legH = u*3;
+    const headW = u*5;
+    const bodyW = u*6;
+    const armW = u*1.5;
+
+    switch (dir) {
+      case 'down': {
+        // Legs
+        const legOff = (walkCycle < 2) ? u : -u;
+        ctx.fillStyle = '#1a3a5a';
+        ctx.fillRect(cx - u*2, legY, u*1.5, legH + legOff * 0.3);
+        ctx.fillRect(cx + u*0.5, legY, u*1.5, legH - legOff * 0.3);
+        // Shoes
+        ctx.fillStyle = '#333';
+        ctx.fillRect(cx - u*2.5, legY + legH + legOff * 0.3 - u, u*2.5, u);
+        ctx.fillRect(cx + u*0.5, legY + legH - legOff * 0.3 - u, u*2.5, u);
+        // Body (jacket)
+        ctx.fillStyle = '#1a5a8a';
+        ctx.fillRect(cx - bodyW/2, bodyY, bodyW, bodyH);
+        // Jacket details
+        ctx.fillStyle = '#1a4a7a';
+        ctx.fillRect(cx - u*0.5, bodyY + u, u, bodyH - u*2); // zipper
+        ctx.fillStyle = '#225588';
+        ctx.fillRect(cx - bodyW/2 + u, bodyY + u, u*2, u*2); // pocket
+        // Arms
+        const armOff = (walkCycle % 2 === 0) ? u*0.5 : -u*0.5;
+        ctx.fillStyle = '#1a5a8a';
+        ctx.fillRect(cx - bodyW/2 - armW, bodyY + u + armOff, armW, bodyH - u*2);
+        ctx.fillRect(cx + bodyW/2, bodyY + u - armOff, armW, bodyH - u*2);
+        // Hands
+        ctx.fillStyle = '#ddb088';
+        ctx.fillRect(cx - bodyW/2 - armW, bodyY + bodyH - u + armOff, armW, u);
+        ctx.fillRect(cx + bodyW/2, bodyY + bodyH - u - armOff, armW, u);
+        // Head
+        ctx.fillStyle = '#ddb088';
+        ctx.fillRect(cx - headW/2, headY, headW, headH);
+        // Hair
+        ctx.fillStyle = '#2a2a2a';
+        ctx.fillRect(cx - headW/2 - u*0.5, headY - u, headW + u, u*2);
+        ctx.fillRect(cx - headW/2 - u*0.5, headY, u, headH * 0.3);
+        ctx.fillRect(cx + headW/2, headY, u, headH * 0.3);
+        // Eyes
+        ctx.fillStyle = '#222';
+        ctx.fillRect(cx - u*1.5, headY + u*1.5, u, u);
+        ctx.fillRect(cx + u*0.5, headY + u*1.5, u, u);
+        // ID badge glow
+        ctx.fillStyle = '#00ff41';
+        ctx.shadowColor = '#00ff41'; ctx.shadowBlur = 3;
+        ctx.fillRect(cx + bodyW/2 - u*2, bodyY + bodyH - u*3, u*1.5, u*2);
+        ctx.shadowBlur = 0;
         break;
-      case 'down':
-        ctx.moveTo(cx, cy + s * 0.8 + arrowSize);
-        ctx.lineTo(cx - arrowSize, cy + s * 0.8);
-        ctx.lineTo(cx + arrowSize, cy + s * 0.8);
+      }
+      case 'up': {
+        // Legs
+        const legOff = (walkCycle < 2) ? u : -u;
+        ctx.fillStyle = '#1a3a5a';
+        ctx.fillRect(cx - u*2, legY, u*1.5, legH + legOff * 0.3);
+        ctx.fillRect(cx + u*0.5, legY, u*1.5, legH - legOff * 0.3);
+        ctx.fillStyle = '#333';
+        ctx.fillRect(cx - u*2, legY + legH + legOff * 0.3 - u, u*2, u);
+        ctx.fillRect(cx + u*0.5, legY + legH - legOff * 0.3 - u, u*2, u);
+        // Body
+        ctx.fillStyle = '#1a5a8a';
+        ctx.fillRect(cx - bodyW/2, bodyY, bodyW, bodyH);
+        // Back detail
+        ctx.fillStyle = '#1a4a7a';
+        ctx.fillRect(cx - u, bodyY + u*2, u*2, u*2);
+        // Arms
+        const armOff = (walkCycle % 2 === 0) ? u*0.5 : -u*0.5;
+        ctx.fillStyle = '#1a5a8a';
+        ctx.fillRect(cx - bodyW/2 - armW, bodyY + u - armOff, armW, bodyH - u*2);
+        ctx.fillRect(cx + bodyW/2, bodyY + u + armOff, armW, bodyH - u*2);
+        ctx.fillStyle = '#ddb088';
+        ctx.fillRect(cx - bodyW/2 - armW, bodyY + bodyH - u - armOff, armW, u);
+        ctx.fillRect(cx + bodyW/2, bodyY + bodyH - u + armOff, armW, u);
+        // Head
+        ctx.fillStyle = '#2a2a2a'; // hair from behind
+        ctx.fillRect(cx - headW/2, headY, headW, headH);
+        ctx.fillStyle = '#ddb088';
+        ctx.fillRect(cx - headW/2 + u, headY + u, headW - u*2, headH - u);
+        // Hair top
+        ctx.fillStyle = '#2a2a2a';
+        ctx.fillRect(cx - headW/2 - u*0.5, headY - u, headW + u, u*2.5);
         break;
-      case 'left':
-        ctx.moveTo(cx - s * 0.6 - arrowSize, cy);
-        ctx.lineTo(cx - s * 0.6, cy - arrowSize);
-        ctx.lineTo(cx - s * 0.6, cy + arrowSize);
+      }
+      case 'left': {
+        // Legs
+        const legOff = (walkCycle < 2) ? u : -u;
+        ctx.fillStyle = '#1a3a5a';
+        ctx.fillRect(cx - u*1.5, legY, u*2.5, legH + legOff * 0.3);
+        ctx.fillStyle = '#333';
+        ctx.fillRect(cx - u*2, legY + legH + legOff * 0.3 - u, u*3, u);
+        // Body (side view — narrower)
+        ctx.fillStyle = '#1a5a8a';
+        ctx.fillRect(cx - u*2, bodyY, u*4, bodyH);
+        // Arm (front)
+        const armOff = (walkCycle % 2 === 0) ? u : -u;
+        ctx.fillStyle = '#1a5a8a';
+        ctx.fillRect(cx - u*3, bodyY + u*1.5 + armOff, armW, bodyH - u*3);
+        ctx.fillStyle = '#ddb088';
+        ctx.fillRect(cx - u*3, bodyY + bodyH - u*1.5 + armOff, armW, u);
+        // Head
+        ctx.fillStyle = '#ddb088';
+        ctx.fillRect(cx - u*2.5, headY, u*4.5, headH);
+        // Hair
+        ctx.fillStyle = '#2a2a2a';
+        ctx.fillRect(cx - u*2.5, headY - u, u*5, u*2);
+        ctx.fillRect(cx + u, headY, u*1.5, headH * 0.5);
+        // Eye
+        ctx.fillStyle = '#222';
+        ctx.fillRect(cx - u*2, headY + u*1.5, u, u);
+        // Badge
+        ctx.fillStyle = '#00ff41';
+        ctx.shadowColor = '#00ff41'; ctx.shadowBlur = 3;
+        ctx.fillRect(cx - u*2, bodyY + bodyH - u*3, u*1.5, u*2);
+        ctx.shadowBlur = 0;
         break;
-      case 'right':
-        ctx.moveTo(cx + s * 0.6 + arrowSize, cy);
-        ctx.lineTo(cx + s * 0.6, cy - arrowSize);
-        ctx.lineTo(cx + s * 0.6, cy + arrowSize);
+      }
+      case 'right': {
+        // Legs
+        const legOff = (walkCycle < 2) ? u : -u;
+        ctx.fillStyle = '#1a3a5a';
+        ctx.fillRect(cx - u, legY, u*2.5, legH + legOff * 0.3);
+        ctx.fillStyle = '#333';
+        ctx.fillRect(cx - u, legY + legH + legOff * 0.3 - u, u*3, u);
+        // Body
+        ctx.fillStyle = '#1a5a8a';
+        ctx.fillRect(cx - u*2, bodyY, u*4, bodyH);
+        // Arm
+        const armOff = (walkCycle % 2 === 0) ? u : -u;
+        ctx.fillStyle = '#1a5a8a';
+        ctx.fillRect(cx + u*1.5, bodyY + u*1.5 + armOff, armW, bodyH - u*3);
+        ctx.fillStyle = '#ddb088';
+        ctx.fillRect(cx + u*1.5, bodyY + bodyH - u*1.5 + armOff, armW, u);
+        // Head
+        ctx.fillStyle = '#ddb088';
+        ctx.fillRect(cx - u*2, headY, u*4.5, headH);
+        // Hair
+        ctx.fillStyle = '#2a2a2a';
+        ctx.fillRect(cx - u*2.5, headY - u, u*5, u*2);
+        ctx.fillRect(cx - u*2.5, headY, u*1.5, headH * 0.5);
+        // Eye
+        ctx.fillStyle = '#222';
+        ctx.fillRect(cx + u, headY + u*1.5, u, u);
+        // Badge
+        ctx.fillStyle = '#00ff41';
+        ctx.shadowColor = '#00ff41'; ctx.shadowBlur = 3;
+        ctx.fillRect(cx + u*0.5, bodyY + bodyH - u*3, u*1.5, u*2);
+        ctx.shadowBlur = 0;
         break;
+      }
     }
-    ctx.closePath();
-    ctx.fill();
-
-    // Glow effect
-    ctx.shadowColor = '#00ddff';
-    ctx.shadowBlur = 8;
-    ctx.fillStyle = 'rgba(0, 221, 255, 0.1)';
-    ctx.beginPath();
-    ctx.arc(cx, cy, s * 0.8, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.shadowBlur = 0;
   }
 
+  // --- PROMPT ---
   drawPrompt(obj) {
     const ctx = this.ctx;
     const ts = this.tileSize;
     const label = `[Space] ${obj.label}`;
-    const fontSize = Math.max(11, ts * 0.3);
-    ctx.font = `${fontSize}px "Courier New", monospace`;
+    const fontSize = Math.max(11, ts * 0.28);
+    ctx.font = `bold ${fontSize}px "Courier New", monospace`;
     const textW = ctx.measureText(label).width;
-    const padding = 8;
+    const padding = 10;
     const bx = this.canvas.width / 2 - textW / 2 - padding;
-    const by = this.canvas.height - 30;
+    const by = this.canvas.height - 28;
 
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
-    ctx.fillRect(bx, by - fontSize / 2 - 4, textW + padding * 2, fontSize + 8);
+    // Background
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.9)';
+    ctx.fillRect(bx - 2, by - fontSize/2 - 6, textW + padding*2 + 4, fontSize + 12);
+    // Border with glow
     ctx.strokeStyle = '#00ff41';
-    ctx.lineWidth = 1;
-    ctx.strokeRect(bx, by - fontSize / 2 - 4, textW + padding * 2, fontSize + 8);
-
+    ctx.shadowColor = '#00ff41'; ctx.shadowBlur = 4;
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(bx - 2, by - fontSize/2 - 6, textW + padding*2 + 4, fontSize + 12);
+    ctx.shadowBlur = 0;
+    // Icon
     ctx.fillStyle = '#00ff41';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.fillText(label, this.canvas.width / 2, by);
   }
 
+  // --- LOGIC ---
   findNearbyObject() {
     if (!this.data || !this.data.objects) return null;
     const p = this.player;
-    // Direction-based check
     const dirOffsets = {
-      up: { dx: 0, dy: -1 },
-      down: { dx: 0, dy: 1 },
-      left: { dx: -1, dy: 0 },
-      right: { dx: 1, dy: 0 },
+      up: {dx:0,dy:-1}, down: {dx:0,dy:1},
+      left: {dx:-1,dy:0}, right: {dx:1,dy:0},
     };
     const off = dirOffsets[p.dir];
-    const fx = p.x + off.dx;
-    const fy = p.y + off.dy;
-
-    // Check facing tile
+    const fx = p.x + off.dx, fy = p.y + off.dy;
     for (const obj of this.data.objects) {
-      if (obj.x === fx && obj.y === fy && obj.interactable !== false) {
-        return obj;
-      }
+      if (obj.x === fx && obj.y === fy && obj.interactable !== false) return obj;
     }
-    // Also check adjacent (all 4 directions)
     for (const obj of this.data.objects) {
       if (obj.interactable === false) continue;
-      const dist = Math.abs(obj.x - p.x) + Math.abs(obj.y - p.y);
-      if (dist === 1) return obj;
+      if (Math.abs(obj.x - p.x) + Math.abs(obj.y - p.y) === 1) return obj;
     }
     return null;
   }
 
   canMove(x, y) {
     if (x < 0 || y < 0 || x >= this.cols || y >= this.rows) return false;
-    const tile = this.data.tiles[y][x];
-    if (tile === 1 || tile === 2) return false;
-    // Check objects
+    if (this.data.tiles[y][x] === 1 || this.data.tiles[y][x] === 2) return false;
     if (this.data.objects) {
       for (const obj of this.data.objects) {
         if (obj.x === x && obj.y === y && obj.walkable === false) return false;
@@ -533,11 +979,8 @@ export class Room {
     const fade = () => {
       this.roomTitleAlpha -= 0.01;
       if (this.roomTitleAlpha <= 0) {
-        this.roomTitleAlpha = 0;
-        this.roomTitle = null;
-      } else {
-        setTimeout(fade, 30);
-      }
+        this.roomTitleAlpha = 0; this.roomTitle = null;
+      } else { setTimeout(fade, 30); }
     };
     setTimeout(fade, 1500);
   }
